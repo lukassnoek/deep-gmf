@@ -4,7 +4,7 @@ from tensorflow.keras.layers import BatchNormalization, MaxPooling2D, Add
 from tensorflow.python.keras.layers.pooling import GlobalAveragePooling2D
 
 
-def ResBlock(x, filters, kernel_size=3, stride=2, block=1):
+def ResBlock(x, filters, kernel_size=3, stride=2, bn_momentum=0.1, block=1):
     """ Block of Conv2D layers with a skip connection
     at the end (which by itself also contains a conv layer).
     Note that the `stride` param is only used in the first
@@ -21,6 +21,8 @@ def ResBlock(x, filters, kernel_size=3, stride=2, block=1):
         Single kernel size (assumed to be square)
     stride : int
         Stride to use for 
+    bn_momentum : float
+        Momentum used for batch norm layers
     block : int
         Index of block (to be used in names)
 
@@ -38,7 +40,7 @@ def ResBlock(x, filters, kernel_size=3, stride=2, block=1):
         x = Conv2D(filters, kernel_size, stride, padding='same',
                    kernel_initializer='he_normal',
                    name=f'conv1_bl{block}')(x)
-        x = BatchNormalization(name=f'bn_conv1_bl{block}')(x)
+        x = BatchNormalization(momentum=bn_momentum, name=f'bn_conv1_bl{block}')(x)
         x = Activation('relu')(x)
 
         # Assume that it has the same number of filters
@@ -47,7 +49,7 @@ def ResBlock(x, filters, kernel_size=3, stride=2, block=1):
         x = Conv2D(filters, kernel_size, 1, padding='same',
                    kernel_initializer='he_normal',
                    name=f'conv2_bl{block}')(x)
-        x = BatchNormalization(name=f'bn_conv2_bl{block}')(x)
+        x = BatchNormalization(momentum=bn_momentum, name=f'bn_conv2_bl{block}')(x)
 
         # Note: you need an additional Conv layer to make sure the shortcut has
         # the same number of filters as the previous conv layers; same for stride
@@ -63,7 +65,7 @@ def ResBlock(x, filters, kernel_size=3, stride=2, block=1):
     return apply
 
 
-def ResNet10(input_shape=(224, 224, 3), n_classes=4):
+def ResNet10(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.1):
     """ ResNet10 model.
     
     Parameters
@@ -72,6 +74,8 @@ def ResNet10(input_shape=(224, 224, 3), n_classes=4):
         Tuple with length 3 (x, y, channels)
     n_classes : int
         Number of output classes
+    bn_momentum : float
+        Momentum used for batch norm layers
 
     Returns
     -------
@@ -110,7 +114,7 @@ def ResNet10(input_shape=(224, 224, 3), n_classes=4):
     return model
 
 
-def ResNet6(input_shape=(224, 224, 3), n_classes=4):
+def ResNet6(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.1):
     """ ResNet6 model.
     
     Parameters
@@ -119,6 +123,8 @@ def ResNet6(input_shape=(224, 224, 3), n_classes=4):
         Tuple with length 3 (x, y, channels)
     n_classes : int
         Number of output classes
+    bn_momentum : float
+        Momentum used for batch norm layers
 
     Returns
     -------
@@ -132,7 +138,7 @@ def ResNet6(input_shape=(224, 224, 3), n_classes=4):
     x = Conv2D(64, 7, 2, padding='same',  # 64 filters, kernel size 7, stride 2
                kernel_initializer='he_normal',
                name='conv_init')(s)
-    x = BatchNormalization(name='bn_conv1')(x)
+    x = BatchNormalization(momentum=bn_momentum, name='bn_conv1')(x)
     x = Activation('relu')(x)
     x = MaxPooling2D(3, 2, padding='same')(x)
 
@@ -141,7 +147,7 @@ def ResNet6(input_shape=(224, 224, 3), n_classes=4):
     for i, nf in enumerate(n_filters):
         # Use a stride of 1 if it's the first block, else 2 for downsampling
         stride = 1 if i == 0 else 2
-        x = ResBlock(x, nf, kernel_size=3, stride=stride, block=i+1)(x)
+        x = ResBlock(x, nf, kernel_size=3, stride=stride, bn_momentum=bn_momentum, block=i+1)(x)
 
     # Average feature maps per filter (resulting in 512 values)
     x = GlobalAveragePooling2D()(x)
