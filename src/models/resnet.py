@@ -4,7 +4,7 @@ from tensorflow.keras.layers import BatchNormalization, MaxPooling2D, Add
 from tensorflow.python.keras.layers.pooling import GlobalAveragePooling2D
 
 
-def ResBlock(x, filters, kernel_size=3, stride=2, bn_momentum=0.1, block=1):
+def ResBlock(x, filters, kernel_size=3, stride=2, bn_momentum=0.01, block=1):
     """ Block of Conv2D layers with a skip connection
     at the end (which by itself also contains a conv layer).
     Note that the `stride` param is only used in the first
@@ -65,7 +65,7 @@ def ResBlock(x, filters, kernel_size=3, stride=2, bn_momentum=0.1, block=1):
     return apply
 
 
-def ResNet10(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.1):
+def ResNet10(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.01):
     """ ResNet10 model.
     
     Parameters
@@ -89,7 +89,7 @@ def ResNet10(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.1):
     x = Conv2D(64, 7, 2, padding='same',  # 64 filters, kernel size 7, stride 2
                kernel_initializer='he_normal',
                name='conv_init')(s)
-    x = BatchNormalization(name='bn_conv1')(x)
+    x = BatchNormalization(name='bn_conv1', momentum=bn_momentum)(x)
     x = Activation('relu')(x)
     x = MaxPooling2D(3, 2, padding='same')(x)
 
@@ -98,7 +98,7 @@ def ResNet10(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.1):
     for i, nf in enumerate(n_filters):
         # Use a stride of 1 if it's the first block, else 2 for downsampling
         stride = 1 if i == 0 else 2
-        x = ResBlock(x, nf, kernel_size=3, stride=stride, block=i+1)(x)
+        x = ResBlock(x, nf, kernel_size=3, stride=stride, bn_momentum=bn_momentum, block=i+1)(x)
 
     # Average feature maps per filter (resulting in 512 values)
     x = GlobalAveragePooling2D()(x)
@@ -114,7 +114,7 @@ def ResNet10(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.1):
     return model
 
 
-def ResNet6(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.1):
+def ResNet6(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.01):
     """ ResNet6 model.
     
     Parameters
