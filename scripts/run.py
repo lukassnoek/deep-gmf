@@ -9,5 +9,5 @@ opt = Adam(learning_rate=0.001)  # lr > 0.001 leads to overshoot
 model.compile(optimizer=opt, loss='categorical_crossentropy', metrics='accuracy')
 
 train_gen, val_gen = create_data_generator('data/human_exp/dataset_info.csv', 'face_id',
-                                           n=1024, n_validation=1024, batch_size=256)
+                                           n=16384, n_validation=2048, batch_size=256)
 model.fit(train_gen, validation_data=val_gen, epochs=100)
