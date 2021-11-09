@@ -11,3 +11,4 @@ Notes on traning CNNs on the data from Daube et al. (2021).
   * Seems that BatchNorm is messing up things
   * Problem is the default momentum parameter (0.99); because of no bias correction?
   * Setting momentum lower (e.g., 0.5) helps, and smaller batch size too ( = more steps, more updating)
+  * "Optimal parameters" (val accuracy > 0.9 after three epochs of 2^14 = 16384 samples): bn_momentum = 0.1, batch size = 64
