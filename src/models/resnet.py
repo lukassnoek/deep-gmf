@@ -4,7 +4,7 @@ from tensorflow.keras.layers import BatchNormalization, MaxPooling2D, Add
 from tensorflow.python.keras.layers.pooling import GlobalAveragePooling2D
 
 
-def ResBlock(x, filters, kernel_size=3, stride=2, bn_momentum=0.01, block=1):
+def ResBlock(filters, kernel_size=3, stride=2, bn_momentum=0.01, block=1):
     """ Block of Conv2D layers with a skip connection
     at the end (which by itself also contains a conv layer).
     Note that the `stride` param is only used in the first
@@ -13,8 +13,6 @@ def ResBlock(x, filters, kernel_size=3, stride=2, bn_momentum=0.01, block=1):
     
     Parameters
     ----------
-    x : Tensor
-        Input to block
     filters : list
         List of number of filters per block
     kernel_size : int
@@ -98,7 +96,7 @@ def ResNet10(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.01):
     for i, nf in enumerate(n_filters):
         # Use a stride of 1 if it's the first block, else 2 for downsampling
         stride = 1 if i == 0 else 2
-        x = ResBlock(x, nf, kernel_size=3, stride=stride, bn_momentum=bn_momentum, block=i+1)(x)
+        x = ResBlock(nf, kernel_size=3, stride=stride, bn_momentum=bn_momentum, block=i+1)(x)
 
     # Average feature maps per filter (resulting in 512 values)
     x = GlobalAveragePooling2D()(x)
@@ -147,7 +145,7 @@ def ResNet6(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.01):
     for i, nf in enumerate(n_filters):
         # Use a stride of 1 if it's the first block, else 2 for downsampling
         stride = 1 if i == 0 else 2
-        x = ResBlock(x, nf, kernel_size=3, stride=stride, bn_momentum=bn_momentum, block=i+1)(x)
+        x = ResBlock(nf, kernel_size=3, stride=stride, bn_momentum=bn_momentum, block=i+1)(x)
 
     # Average feature maps per filter (resulting in 512 values)
     x = GlobalAveragePooling2D()(x)

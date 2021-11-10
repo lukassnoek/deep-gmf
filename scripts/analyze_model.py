@@ -19,7 +19,7 @@ from src.models import MODELS
 def main(model_name, n_samples):
 
     model = load_model(f'models/{model_name}')
-    extractor = Model(inputs=model.inputs, outputs=[layer.output for layer in model.layers])
+    extractor = Model(inputs=model.inputs, outputs=[layer.output for layer in model.layers[::5]])
 
     train_gen, train_df = create_data_generator(
         'data/human_exp/dataset_info.csv', 'face_id',

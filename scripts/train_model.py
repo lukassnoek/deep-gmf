@@ -10,7 +10,6 @@ from tensorflow.keras.optimizers import Adam
 @click.command()
 @click.argument('model_name', type=click.Choice(MODELS.keys()))
 @click.option('--n-classes', type=click.INT, default=4)
-@click.option('--lr', type=click.FLOAT, default=0.001)
 @click.option('--n-train', type=click.INT, default=16384)
 @click.option('--n-val', type=click.INT, default=2048)
 @click.option('--batch-size', type=click.INT, default=256)
