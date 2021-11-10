@@ -2,9 +2,9 @@ import pandas as pd
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 
-def create_data_generator(df_path, y, n=None, n_validation=None, rescale=1./255,
-                          target_size=(224, 224), batch_size=128, seed=42, return_df=False,
-                          **kwargs):
+def create_data_generator(df_path, y, n=None, n_validation=None,
+                          rescale=1./255, target_size=(224, 224), batch_size=128, seed=42,
+                          return_df=False, **kwargs):
     """ Creates a ImageDataGenerator object from a dataframe with
     filenames and target variable(s). 
     
@@ -24,7 +24,7 @@ def create_data_generator(df_path, y, n=None, n_validation=None, rescale=1./255,
 
     # Initialize data generator
     data_gen = ImageDataGenerator(
-        rescale=rescale,
+        rescale=rescale, 
     )
 
     train_gen = data_gen.flow_from_dataframe(
