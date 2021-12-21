@@ -63,7 +63,7 @@ def ResBlock(filters, kernel_size=3, stride=2, bn_momentum=0.01, block=1):
     return apply
 
 
-def ResNet10(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.01):
+def ResNet10(input_shape=(256, 256, 3), n_classes=4, bn_momentum=0.01):
     """ ResNet10 model.
     
     Parameters

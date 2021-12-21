@@ -1,9 +1,9 @@
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Input, Conv2D, Dense
-from tensorflow.keras.layers import MaxPooling2D, GlobalAveragePooling2D
+from tensorflow.keras.layers import GlobalAveragePooling2D
 
 
-def PikeNet(input_shape=(224, 224, 3), n_classes=4):
+def PikeNet(input_shape=(256, 256, 3), filter_mult=1, n_classes=4):
     """ PikeNet.
     
     Parameters
@@ -20,13 +20,13 @@ def PikeNet(input_shape=(224, 224, 3), n_classes=4):
     """    
 
     s = Input(input_shape, name='input0')  # s = stimulus
-    x = Conv2D(16, 3, strides=2, padding='same', activation='relu', name='conv1')(s)
-    x = Conv2D(16, 3, strides=2, padding='same', activation='relu', name='conv2')(x)
-    x = Conv2D(32, 3, strides=2, padding='same', activation='relu', name='conv3')(x)
-    x = Conv2D(32, 3, strides=2, padding='same', activation='relu', name='conv4')(x)
-    x = Conv2D(64, 3, strides=2, padding='same', activation='relu', name='conv5')(x)
-    x = Conv2D(64, 3, strides=2, padding='same', activation='relu', name='conv6')(x)
-    x = Conv2D(128, 3, strides=2, padding='same', activation='relu', name='conv7')(x)
+    x = Conv2D(16 * filter_mult, 3, strides=2, padding='same', activation='relu', name='conv1')(s)
+    x = Conv2D(16 * filter_mult, 3, strides=2, padding='same', activation='relu', name='conv2')(x)
+    x = Conv2D(32 * filter_mult, 3, strides=2, padding='same', activation='relu', name='conv3')(x)
+    x = Conv2D(32 * filter_mult, 3, strides=2, padding='same', activation='relu', name='conv4')(x)
+    x = Conv2D(64 * filter_mult, 3, strides=2, padding='same', activation='relu', name='conv5')(x)
+    x = Conv2D(64 * filter_mult, 3, strides=2, padding='same', activation='relu', name='conv6')(x)
+    x = Conv2D(128 * filter_mult, 3, strides=2, padding='same', activation='relu', name='conv7')(x)
 
     x = GlobalAveragePooling2D(name='globalpooling8')(x)
     y = Dense(units=n_classes, activation='softmax', name='dense9')(x)

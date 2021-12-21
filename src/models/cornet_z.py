@@ -3,7 +3,7 @@ from tensorflow.keras.layers import Input, Conv2D, Dense
 from tensorflow.keras.layers import MaxPooling2D, GlobalAveragePooling2D
 
 
-def CORnet_Z(input_shape=(224, 224, 3), n_classes=4):
+def CORnet_Z(input_shape=(256, 256, 3), n_classes=4):
     """ CORnet_Z model (Kubilius et al., 2018, BioRxiv, 
     https://doi.org/10.1101/408385).
     

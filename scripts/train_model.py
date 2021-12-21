@@ -2,6 +2,7 @@ import sys
 import click
 import os.path as op
 import pandas as pd
+import tensorflow as tf
 
 sys.path.append('.')
 from src.models import MODELS
@@ -19,22 +20,23 @@ from tensorflow.keras.optimizers import Adam
 @click.option('--batch-size', type=click.INT, default=256)
 @click.option('--epochs', type=click.INT, default=10)
 @click.option('--lr', type=click.FLOAT, default=0.001)
-@click.option('--device', type=click.Choice(['cpu', 'gpu']))
-def main(model_name, dataset, target, n_id, n_train, n_val, batch_size, epochs, lr, device):
-
-    if device == 'cpu':
-        import tensorflow as tf
-        tf.config.set_visible_devices([], 'GPU')
+def main(model_name, dataset, target, n_id, n_train, n_val, batch_size, epochs, lr):
 
     # Peek at data to determine number of output classes
     info = pd.read_csv(op.join(DATASETS[dataset], 'dataset_info.csv'))
-    info = info.query("id < @n_id")
-    info = info.astype({'id': str})
+    if target == 'id':
+        info = info.query("id < @n_id")
+        
+    info = info.astype({target: str})
+    #info = info.astype({'id': str})
+    
     n_classes = info[target].unique().size
 
-    model = MODELS[model_name](n_classes=n_classes)
-    opt = Adam(learning_rate=lr)
-    model.compile(optimizer=opt, loss='categorical_crossentropy', metrics='accuracy')
+    strategy = tf.distribute.MirroredStrategy()
+    with strategy.scope():
+        model = MODELS[model_name](n_classes=n_classes)
+        opt = Adam(learning_rate=lr)
+        model.compile(optimizer=opt, loss='categorical_crossentropy', metrics='accuracy')
 
     train_gen, val_gen = create_data_generator(
         info, target, n=n_train, n_validation=n_val, batch_size=batch_size
