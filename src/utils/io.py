@@ -2,10 +2,8 @@ import pandas as pd
 import os.path as op
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
-
 DATASETS = {
-    'fairface': op.join('data', 'fairface-img-margin025-trainval'),
-    'human_exp': op.join('data', 'human_exp')
+    'mini_gmf_dataset': '/analyse/Project0257/lukas/data/mini_gmf_dataset'
 }
 
 
@@ -24,6 +22,7 @@ def create_data_generator(df_path, y, n=None, n_validation=None, rescale=1./255,
     else:
         df = df_path
 
+    # Always shuffle!
     df = df.sample(frac=1)
     
     if n is not None:
@@ -47,7 +46,7 @@ def create_data_generator(df_path, y, n=None, n_validation=None, rescale=1./255,
     )
 
     train_gen = data_gen.flow_from_dataframe(
-        df_train, x_col='file', y_col=y,
+        df_train, x_col='filename', y_col=y,
         target_size=target_size, batch_size=batch_size, seed=seed,
         **kwargs
     )
@@ -56,7 +55,7 @@ def create_data_generator(df_path, y, n=None, n_validation=None, rescale=1./255,
     if n_validation is not None:
         
         val_gen = data_gen.flow_from_dataframe(
-            df_val, x_col='file', y_col=y,
+            df_val, x_col='filename', y_col=y,
             target_size=target_size, batch_size=batch_size, seed=seed, **kwargs
         )
         to_return += (val_gen,)
