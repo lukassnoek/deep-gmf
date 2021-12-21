@@ -1,105 +1,136 @@
-#%%
+#%% IMPORTS + DATA LOADING
 import os
 os.environ['DISPLAY'] = ':0.0'
 import shutil
 import numpy as np
-import pandas as pd
+from PIL import Image
 from pathlib import Path
+from itertools import product
+from tqdm import tqdm
 from GFG import Ctx
 from GFG.model import Nf
 from GFG.identity import IDModel
 from ogbGL.draw_objects import Camera
 
-np.random.seed(42)
+
 try:
+    # If run in CLI
     ROOT = Path(__file__).parents[1]
 except:
+    # If run interactively
     ROOT = Path('/home/lukass/deep-gmf')
 
-def _create_filename(i, gender, ethn, age, xr, yr, zr, xt, yt):
-    f_out = str(ROOT / f'data/gender-{gender}/ethn-{ethn}/age-{age}/id-{str(i+1).zfill(4)}')
-    
-    for n, p in {'xr': xr, 'yr': yr, 'zr': zr, 'xt': xt, 'yt': yt, 'zt': zt}.items():
-        if isinstance(p, (int, float)):
-            if p == 0:
-                p = f'n{p}'
-            elif p > 0:
-                p = f'p{p}'
-            else:
-                p = f'm{abs(p)}'
-                        
-        f_out += f'_{n}-{p}'
-    
-    f_out += '.png'
-    return f_out            
+OUT_DIR = Path('/analyse/Project0257/lukas/data/mini_gmf_dataset')
+
+# Load identity model + base nf
+IDM_PATH = '/analyse/Project0294/GFG_data/model_HDB_linear_v2dense_compact.mat'
+idm = IDModel.load(IDM_PATH)
+base_nf = Nf.from_default()
+
+#%%  SETUP CAMERA + DEFINITION PARAMETERS
 
 # Setup openGL context + camera
 ctx = Ctx(res=(256, 256), renderscale=4.)
 ctx.camera[0] = Camera(
     ctx.win, ctx._ar,
     target = [-11.5644, -13.0381, 0],
-    eye = [-11.5644, -13.0381, 450.],
+    # Increase distance to 700 (fits face in FOV)
+    eye = [-11.5644, -13.0381, 700],
     up = [0,1,0],
     FOV = 50,
     near = 100.0,
     far = 1000.0
 )
+# Reset lights
 ctx.transform_lights(0, 0, 0, order='xyz')
 
-# Load identity model
-data_path = '/analyse/Project0294/GFG_data/model_HDB_linear_v2dense_compact.mat'
-idm = IDModel.load(data_path)
-base_nf = Nf.from_default()
-
-#%%
 # Generation parameters
-N_IDS = 1
-x_rots = [-60, -45, -30, -15, 0, 15, 30, 45, 60]
-y_rots = [-60, -45, -30, -15, 0, 15, 30, 45, 60]
-z_rots = [0, 45, 90, 135, 180, 225, 270, 315]
-x_trans = [-50, -25, 0, 25, 50]
-y_trans = [-50, -25, 0, 25, 50]
-z_trans = [0]#-300, -200, -100, 0, 100]
+N_IDS = 50
+GENDERS = ['F', 'M']
+ETHNS = ['WC', 'BA', 'EA']
+AGES = [20, 40]
+BGS = [0, 1]  # backgrounds
 
-if (ROOT / 'data' / 'gender-M').exists():
-    shutil.rmtree(ROOT / 'data' / 'gender-M')
+# Rotations (RS) and translations (TS)
+# Note: no translations in Z for now
+XRS = [(0, -45), (1, 0), (2, 45)]
+YRS = [(0, -45), (1, 0), (2, 45)]
+ZRS = [(0, -45), (1, 0), (2, 45)]
+XTS = [(0, -150), (1, 0), (2, 150)]
+YTS = [(0, -150), (1, 0), (2, 150)]
 
-gender, ethn, age = 'M', 'WC', 25
+# Light rotations
+XYZ_LIGHTS = [
+    (0, (0, 0, 0)),    # in front
+    (1, (-90, 0, 0)),  # above 
+    (2, (+90, 0, 0)),  # below
+    (3, (0, -90, 0)),  # left
+    (4, (0, +90, 0))   # right
+]
+
+# For extra detail; used in `idm.generate`
+tdet = np.load(ROOT / 'data' / 'tdet.npy')
+
+# Pre-load background images, to be blended in image later
+bg_imgs = [np.array(Image.open(ROOT / 'data' / f'background_{i}.png'))
+           for i in range(1, 4)]
+
+#%%  MAIN GENERATION LOOP
+if OUT_DIR.exists():
+    shutil.rmtree(OUT_DIR)
+
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# Loop across ID parameters
+id_params = product(GENDERS, ETHNS, AGES)
+for gender, ethn, age in id_params:
     
-v_coeff = np.random.normal(0, 1, size=len(idm))
-t_coeff = np.random.normal(0, 1, size=(idm.nbands, len(idm)))
+    # Create `N_IDS` identities with ID parameters
+    for idt in tqdm(range(N_IDS)):
+        
+        # Generate vertex and texture parameters
+        # FIXME: shouldn't this be uniform from [-x*sd, +x*sd] ? 
+        v_coeff = np.random.normal(0, 1, size=len(idm))
+        t_coeff = np.random.normal(0, 1, size=(idm.nbands, len(idm)))
 
-tdet = np.load(ROOT / 'GFG_data' / 'tdet.npy')
-nf = idm.generate(v_coeff, t_coeff, ethnicity=ethn, gender=gender, age=age,
-                  basenf=base_nf, tdet=tdet)
-nf.attach(ctx)
-head_idx = nf.groupvindex[nf.groupnames.index('head')] - 1
-com = nf.v[head_idx, :].mean(axis=0)  # center of mass
+        # Generate neutral face with ID parameters
+        nf = idm.generate(v_coeff, t_coeff, ethnicity=ethn, gender=gender, age=age,
+                          basenf=base_nf, tdet=tdet)
+        nf.attach(ctx)  # attach to openGL context
 
-out_dir = ROOT / f'data/gender-{gender}/ethn-{ethn}/age-{age}/id-{str(1).zfill(4)}'
-for ixr, xr in enumerate(x_rots):
-    for iyr, yr in enumerate(y_rots):
-        for izr, zr in enumerate(z_rots):
-            for ixt, xt in enumerate(x_trans):
-                for iyt, yt in enumerate(y_trans):
-                    for izt, zt in enumerate(z_trans):
-                        f_out = out_dir / f'xr-{ixr}_yr-{iyr}_zr-{izr}_xt-{ixt}_yt-{iyt}_zt-{izt}.png'
-                        # Translate to origin, rotate, and apply actual translation
-                        nf.transform_model(0, 0, 0, [0, 0, 0], replace=True)
-                        nf.transform_model(xr, yr, zr, -com, order='txyz', replace=True)
-                        nf.transform_model(0, 0, 0, np.array([xt, yt, zt]), order='t', replace=False)
+        # Compute center of mass (not used for now)            
+        #head_idx = nf.groupvindex[nf.groupnames.index('head')] - 1
+        #com = nf.v[head_idx, :].mean(axis=0)  # center of mass
 
-                        # Render + save
-                        img = ctx.render(dest='image')
-                        Path(f_out).parent.mkdir(parents=True, exist_ok=True)
-                        img.save(str(f_out))
+        this_out_dir = OUT_DIR / f'gender-{gender}/ethn-{ethn}/age-{age}/id-{str(idt).zfill(3)}'
 
-nf.detach()
-                    
-                    
-# tf.transform_model(x, y, z, tx, ty, tz, scale, order='xyzts')
-#ctx.set_lights()
-# from ogbGL.draw_objects import Light
-# new_light = Light(ctx.win)
-# ctx.lights.append(new_light)
+        stim_params = product(BGS, XRS, YRS, ZRS, XTS, YTS, XYZ_LIGHTS)
+        for bg, xr, yr, zr, xt, yt, (i_xyzl, xyzl) in stim_params:
+            (ixr, xr), (iyr, yr), (izr, zr) = [xr, yr, zr]
+            (ixt, xt), (iyt, yt), = [xt, yt]
+            
+            f_out = this_out_dir / f'bg-{bg}_xr-{ixr}_yr-{iyr}_zr-{izr}_xt-{ixt}_yt-{iyt}_l-{i_xyzl}.png'
+        
+            # Translate to origin, rotate, and apply actual translation
+            nf.transform_model(0, 0, 0, [0, 0, 0], order='txyz', replace=True)
+            nf.transform_model(xr, yr, zr, [xt, yt, 0], order='xyzt', replace=False)
+
+            ctx.set_lights(Path(ROOT / 'lights.yaml'))
+            ctx.transform_lights(*xyzl, [0, 0, 0])
+
+            # Render + alpha blend img & background
+            img = ctx.render(dest='image')
+            img_arr = np.array(img)
+            img_rgb, img_a = img_arr[..., :3], img_arr[..., 3, None] / 255.
+            bg_rgb = bg_imgs[bg]
+            img_arr = (img_rgb * img_a) + (bg_rgb * (1 - img_a))
+            img_arr = np.dstack((img_arr, np.ones((256, 256)) * 255)).astype(np.uint8)
+            
+            # Save to disk
+            #img_arr[126:128, 126:128, :] = [255, 0, 0]
+            img = Image.fromarray(img_arr)
+            Path(f_out).parent.mkdir(parents=True, exist_ok=True)
+            img.save(str(f_out))
+            
+        nf.detach()
 # %%
