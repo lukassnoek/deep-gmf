@@ -12,37 +12,38 @@ from tensorflow.keras.optimizers import Adam
 
 @click.command()
 @click.argument('model_name', type=click.Choice(MODELS.keys()))
-@click.option('--dataset', type=click.STRING, default='mini_gmf_dataset')
+@click.option('--dataset', type=click.STRING, default='gmfmini')
 @click.option('--target', type=click.STRING, default='id')
-@click.option('--n-id', type=click.INT, default=10)
-@click.option('--n-train', type=click.INT, default=16384)
-@click.option('--n-val', type=click.INT, default=2048)
+@click.option('--n-train', type=click.INT, default=None)
+@click.option('--n-val', type=click.INT, default=None)
+@click.option('--validation-split', type=click.FLOAT, default=0.1)
 @click.option('--batch-size', type=click.INT, default=256)
 @click.option('--epochs', type=click.INT, default=10)
 @click.option('--lr', type=click.FLOAT, default=0.001)
-def main(model_name, dataset, target, n_id, n_train, n_val, batch_size, epochs, lr):
+@click.option('--gpu', type=click.INT, default=[0], multiple=True)
+def main(model_name, dataset, target, n_train, n_val, validation_split, batch_size, epochs, lr, gpu):
 
     # Peek at data to determine number of output classes
     info = pd.read_csv(op.join(DATASETS[dataset], 'dataset_info.csv'))
-    if target == 'id':
-        info = info.query("id < @n_id")
-        
     info = info.astype({target: str})
-    #info = info.astype({'id': str})
-    
     n_classes = info[target].unique().size
 
-    strategy = tf.distribute.MirroredStrategy()
+    devices = [f"/gpu:{g}" for g in gpu]
+    strategy = tf.distribute.MirroredStrategy(devices=devices)
+    
     with strategy.scope():
         model = MODELS[model_name](n_classes=n_classes)
         opt = Adam(learning_rate=lr)
         model.compile(optimizer=opt, loss='categorical_crossentropy', metrics='accuracy')
 
     train_gen, val_gen = create_data_generator(
-        info, target, n=n_train, n_validation=n_val, batch_size=batch_size
+        info, target, n=n_train, n_validation=n_val,
+        validation_split=validation_split, batch_size=batch_size
     )
-    model.fit(train_gen, validation_data=val_gen, epochs=epochs)
+    
+    history = model.fit(train_gen, validation_data=val_gen, epochs=epochs)
     model.save(f'models/{model.name}_dataset-{dataset}')
+    pd.DataFrame(history.history).to_csv(f'models/{model.name}_dataset-{dataset}_history.csv', index=False)
 
 
 if __name__ == '__main__':

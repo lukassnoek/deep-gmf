@@ -19,7 +19,7 @@ MAPPING = {
 def main(dataset_name):
 
     data_dir = Path(f'/analyse/Project0257/lukas/data/{dataset_name}')
-    files = sorted(data_dir.glob('**/*.png'))
+    files = data_dir.glob('**/*.png')
     info = defaultdict(list)
     for f in tqdm(files):
         info['filename'].append(f)
@@ -33,8 +33,8 @@ def main(dataset_name):
             info[k].append(v) 
 
     df = pd.DataFrame.from_dict(info)
+    df = df.sort_values(by='id', axis=0)
     df.to_csv(data_dir / 'dataset_info.csv', index=False)
-    df = df.loc[df['id'].astype(int) < 16, :]
     corrs = pd.get_dummies(df.drop('filename', axis=1)).corr()
     print(corrs.round(3))
 
