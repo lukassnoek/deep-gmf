@@ -18,7 +18,7 @@ def ResBlock(filters, kernel_size=3, stride=2, bn_momentum=0.01, block=1):
     kernel_size : int
         Single kernel size (assumed to be square)
     stride : int
-        Stride to use for 
+        Stride to use for convolution
     bn_momentum : float
         Momentum used for batch norm layers
     block : int
@@ -35,35 +35,37 @@ def ResBlock(filters, kernel_size=3, stride=2, bn_momentum=0.01, block=1):
         sc = x  # sc = shortcut
         
         # Block with 2 conv layers
+        name = f'layer-{(block-1) * 2 + 2}_block-{block}'
         x = Conv2D(filters, kernel_size, stride, padding='same',
                    kernel_initializer='he_normal',
-                   name=f'conv1_bl{block}')(x)
-        x = BatchNormalization(momentum=bn_momentum, name=f'bn_conv1_bl{block}')(x)
-        x = Activation('relu')(x)
+                   name=f'{name}_conv')(x)
+        x = BatchNormalization(momentum=bn_momentum, name=f'{name}_bnorm')(x)
+        x = Activation('relu', name=f'{name}_relu')(x)
 
         # Assume that it has the same number of filters
         # Also, stride is per definition 1 (because we only need to
         # subsample once)
+        name = f'layer-{(block-1) * 2 + 3}_block-{block}'
         x = Conv2D(filters, kernel_size, 1, padding='same',
                    kernel_initializer='he_normal',
-                   name=f'conv2_bl{block}')(x)
-        x = BatchNormalization(momentum=bn_momentum, name=f'bn_conv2_bl{block}')(x)
+                   name=f'{name}_conv')(x)
+        x = BatchNormalization(momentum=bn_momentum, name=f'{name}_bnorm')(x)
 
         # Note: you need an additional Conv layer to make sure the shortcut has
         # the same number of filters as the previous conv layers; same for stride
         sc = Conv2D(filters, kernel_size, stride, padding='same',
                     kernel_initializer='he_normal',
-                    name=f'convsc_bl{block}')(sc)
-        
-        x = Add()([x, sc])
-        x = Activation('relu')(x)
+                    name=f'{name}_conv_shortcut')(sc)
+
+        x = Add(name=f'{name}_add')([x, sc])
+        x = Activation('relu', name=f'{name}_relu')(x)
 
         return x
 
     return apply
 
 
-def ResNet10(input_shape=(256, 256, 3), n_classes=4, bn_momentum=0.01):
+def ResNet10(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.01):
     """ ResNet10 model.
     
     Parameters
@@ -81,15 +83,15 @@ def ResNet10(input_shape=(256, 256, 3), n_classes=4, bn_momentum=0.01):
         Keras model
     """    
     
-    s = Input(input_shape)  # s = stimulus
+    s = Input(input_shape, name='layer-0_input')  # s = stimulus
     
     # ResNet initial block: Conv block + Maxpool
     x = Conv2D(64, 7, 2, padding='same',  # 64 filters, kernel size 7, stride 2
                kernel_initializer='he_normal',
-               name='conv_init')(s)
-    x = BatchNormalization(name='bn_conv1', momentum=bn_momentum)(x)
-    x = Activation('relu')(x)
-    x = MaxPooling2D(3, 2, padding='same')(x)
+               name='layer-1_conv')(s)
+    x = BatchNormalization(momentum=bn_momentum, name='layer-1_bnorm')(x)
+    x = Activation('relu', name='layer-1_relu')(x)
+    x = MaxPooling2D(3, 2, padding='same', name='layer-1_pool')(x)
 
     # Add four residual conv blocks with an increasing number of filters,
     n_filters = [64, 128, 256, 512]
@@ -99,13 +101,13 @@ def ResNet10(input_shape=(256, 256, 3), n_classes=4, bn_momentum=0.01):
         x = ResBlock(nf, kernel_size=3, stride=stride, bn_momentum=bn_momentum, block=i+1)(x)
 
     # Average feature maps per filter (resulting in 512 values)
-    x = GlobalAveragePooling2D()(x)
+    x = GlobalAveragePooling2D(name='layer-9_globalpool')(x)
 
     # Add classification head
     if n_classes == 2:
-        y = Dense(1, activation='sigmoid', name='fc')(x)
+        y = Dense(1, activation='sigmoid', name='layer-10_fc')(x)
     else:
-        y = Dense(n_classes, activation='softmax', name='fc')(x)
+        y = Dense(n_classes, activation='softmax', name='layer-10_fc')(x)
 
     # Create model
     model = Model(inputs=s, outputs=y, name='ResNet10')
@@ -130,15 +132,15 @@ def ResNet6(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.01):
         Keras model
     """    
     
-    s = Input(input_shape)  # s = stimulus
+    s = Input(input_shape, name='layer-0_input')  # s = stimulus
     
     # ResNet initial block: Conv block + Maxpool
     x = Conv2D(64, 7, 2, padding='same',  # 64 filters, kernel size 7, stride 2
                kernel_initializer='he_normal',
-               name='conv_init')(s)
-    x = BatchNormalization(momentum=bn_momentum, name='bn_conv1')(x)
-    x = Activation('relu')(x)
-    x = MaxPooling2D(3, 2, padding='same')(x)
+               name='layer-1_conv')(s)
+    x = BatchNormalization(momentum=bn_momentum, name='layer-1_bnorm')(x)
+    x = Activation('relu', name='layer-1_relu')(x)
+    x = MaxPooling2D(3, 2, padding='same', name='layer-1_pool')(x)
 
     # Add four residual conv blocks with an increasing number of filters,
     n_filters = [64, 128]
@@ -148,13 +150,13 @@ def ResNet6(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.01):
         x = ResBlock(nf, kernel_size=3, stride=stride, bn_momentum=bn_momentum, block=i+1)(x)
 
     # Average feature maps per filter (resulting in 512 values)
-    x = GlobalAveragePooling2D()(x)
+    x = GlobalAveragePooling2D(name='layer-5_globalpool')(x)
 
     # Add classification head
     if n_classes == 2:
-        y = Dense(1, activation='sigmoid', name='fc')(x)
+        y = Dense(1, activation='sigmoid', name='layer-6_fc')(x)
     else:
-        y = Dense(n_classes, activation='softmax', name='fc')(x)
+        y = Dense(n_classes, activation='softmax', name='layer-6_fc')(x)
 
     # Create model
     model = Model(inputs=s, outputs=y, name='ResNet6')
@@ -163,24 +165,7 @@ def ResNet6(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.01):
 
 if __name__ == '__main__':
 
-    import numpy as np
-    from tensorflow.keras.utils import to_categorical
-
-    # Simulate some data from a linear model, Y = argmax(XW)
-    N, C = 512, 4
-    X = np.random.normal(0, 1, size=(N, 224, 224, 3)).astype('float32')
-    W = np.random.normal(0, 0.005, size=(C, 224, 224, 3)).astype('float32')
-    Z = X.reshape((N, 224 * 224 * 3)) @ W.reshape((224 * 224 * 3, C))
-    Y = to_categorical(Z.argmax(axis=1))
-
     # Initialize and compile model
-    model = ResNet10(n_classes=C)
+    model = ResNet10(n_classes=4)
     model.compile(optimizer='adam', loss='categorical_crossentropy', metrics='accuracy')
-
-    # Fit!    
-    model.fit(X, Y, batch_size=64, epochs=5, validation_split=0.2)
-
-    X = np.random.normal(0, 1, size=(N, 224, 224, 3)).astype('float32')
-    Z = X.reshape((N, 224 * 224 * 3)) @ W.reshape((224 * 224 * 3, C))
-    Y = to_categorical(Z.argmax(axis=1))
-    model.evaluate(x=X, y=Y)
+    print(model.summary())

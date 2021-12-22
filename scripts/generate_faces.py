@@ -20,7 +20,7 @@ except:
     # If run interactively
     ROOT = Path('/home/lukass/deep-gmf')
 
-OUT_DIR = Path('/analyse/Project0257/lukas/data/mini_gmf_dataset')
+OUT_DIR = Path('/analyse/Project0257/lukas/data/gmfmini')
 
 # Load identity model + base nf
 IDM_PATH = '/analyse/Project0294/GFG_data/model_HDB_linear_v2dense_compact.mat'
@@ -45,10 +45,11 @@ ctx.camera[0] = Camera(
 ctx.transform_lights(0, 0, 0, order='xyz')
 
 # Generation parameters
-N_IDS = 50
+N_IDS = 5
 GENDERS = ['F', 'M']
 ETHNS = ['WC', 'BA', 'EA']
-AGES = [20, 40]
+#AGES = [20, 40]
+age = 25
 BGS = [0, 1]  # backgrounds
 
 # Rotations (RS) and translations (TS)
@@ -69,7 +70,7 @@ XYZ_LIGHTS = [
 ]
 
 # For extra detail; used in `idm.generate`
-tdet = np.load(OUT_DIR / 'tdet.npy')
+tdet = np.load(OUT_DIR.parent / 'tdet.npy')
 
 # Pre-load background images, to be blended in image later
 bg_imgs = [np.array(Image.open(ROOT / 'data' / f'background_{i}.png'))
@@ -82,17 +83,20 @@ if OUT_DIR.exists():
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Loop across ID parameters
-id_params = product(GENDERS, ETHNS, AGES)
-for gender, ethn, age in id_params:
+id_params = product(GENDERS, ETHNS)#, AGES)
+current_id = 0
+for gender, ethn in id_params:
     
     # Create `N_IDS` identities with ID parameters
-    for idt in tqdm(range(N_IDS)):
+    for _ in tqdm(range(N_IDS)):
+
+        this_out_dir = OUT_DIR / f'id-{str(current_id).zfill(3)}_gender-{gender}_ethn-{ethn}_age-{age}'
         
         # Generate vertex and texture parameters
-        # FIXME: shouldn't this be uniform from [-x*sd, +x*sd] ? 
         v_coeff = np.random.normal(0, 1, size=len(idm))
         t_coeff = np.random.normal(0, 1, size=(idm.nbands, len(idm)))
-
+        np.savez(str(this_out_dir) + '.npz', v_coeff=v_coeff, t_coeff=t_coeff)
+        
         # Generate neutral face with ID parameters
         nf = idm.generate(v_coeff, t_coeff, ethnicity=ethn, gender=gender, age=age,
                           basenf=base_nf, tdet=tdet)
@@ -102,8 +106,6 @@ for gender, ethn, age in id_params:
         #head_idx = nf.groupvindex[nf.groupnames.index('head')] - 1
         #com = nf.v[head_idx, :].mean(axis=0)  # center of mass
 
-        this_out_dir = OUT_DIR / f'gender-{gender}/ethn-{ethn}/age-{age}/id-{str(idt).zfill(3)}'
-
         stim_params = product(BGS, XRS, YRS, ZRS, XTS, YTS, XYZ_LIGHTS)
         for bg, xr, yr, zr, xt, yt, (i_xyzl, xyzl) in stim_params:
             (ixr, xr), (iyr, yr), (izr, zr) = [xr, yr, zr]
@@ -111,7 +113,7 @@ for gender, ethn, age in id_params:
             
             f_out = this_out_dir / f'bg-{bg}_xr-{ixr}_yr-{iyr}_zr-{izr}_xt-{ixt}_yt-{iyt}_l-{i_xyzl}.png'
         
-            # Translate to origin, rotate, and apply actual translation
+            # Reset to default position and apply actual translation/rotation
             nf.transform_model(0, 0, 0, [0, 0, 0], order='txyz', replace=True)
             nf.transform_model(xr, yr, zr, [xt, yt, 0], order='xyzt', replace=False)
 
@@ -123,7 +125,7 @@ for gender, ethn, age in id_params:
             img_arr = np.array(img)
             img_rgb, img_a = img_arr[..., :3], img_arr[..., 3, None] / 255.
             bg_rgb = bg_imgs[bg]
-            img_arr = (img_rgb * img_a) + (bg_rgb * (1 - img_a))
+            img_arr = (img_rgb * img_a) + (bg_rgb * (1 - img_a))  # alpha blend
             img_arr = np.dstack((img_arr, np.ones((256, 256)) * 255)).astype(np.uint8)
             
             # Save to disk
@@ -133,4 +135,5 @@ for gender, ethn, age in id_params:
             img.save(str(f_out))
             
         nf.detach()
+        current_id += 1
 # %%

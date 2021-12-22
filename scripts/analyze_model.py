@@ -3,14 +3,15 @@ import click
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from pathlib import Path
 from scipy.stats import pearsonr
 from tensorflow.keras import Model
 from tensorflow.keras.models import load_model
 from scipy.spatial.distance import pdist, squareform
 
 sys.path.append('.')
-from src.utils.io import create_data_generator
 from src.models import MODELS
+from src.utils.io import create_data_generator, DATASETS
 
 
 @click.command()
@@ -18,12 +19,10 @@ from src.models import MODELS
 @click.option('-n', '--n-samples', type=click.INT, default=512)
 def main(model_name, n_samples):
 
-    model = load_model(f'models/{model_name}')
-    extractor = Model(inputs=model.inputs, outputs=[layer.output for layer in model.layers[::5]])
-
+    info = pd.read_csv(Path(DATASETS['mini_gmf_dataset']) / 'dataset_info.csv')
     train_gen, train_df = create_data_generator(
-        'data/human_exp/dataset_info.csv', 'face_id',
-        n=n_samples, batch_size=n_samples, return_df=True, shuffle=False
+        info, y='id', n=n_samples, batch_size=n_samples, return_df=True,
+        shuffle=False
     )  # set shuffle to False so train_gen and train_df have the same order
 
     # Get data and reorder according to y (nice for RDM viz)
@@ -31,6 +30,9 @@ def main(model_name, n_samples):
     reord = np.argmax(y, axis=1).argsort()
 
     # Extract layer representations (Z is a list with layer maps)
+    model = load_model(f'models/{model_name}')
+    extractor = Model(inputs=model.inputs, outputs=[layer.output for layer in model.layers[::5]])
+
     Z = extractor(X[reord, ...])
 
     # Plot RDM per layer and correlation (DNN, faceID)

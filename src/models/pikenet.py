@@ -19,17 +19,17 @@ def PikeNet(input_shape=(256, 256, 3), filter_mult=1, n_classes=4):
         Keras model
     """    
 
-    s = Input(input_shape, name='input0')  # s = stimulus
-    x = Conv2D(16 * filter_mult, 3, strides=2, padding='same', activation='relu', name='conv1')(s)
-    x = Conv2D(16 * filter_mult, 3, strides=2, padding='same', activation='relu', name='conv2')(x)
-    x = Conv2D(32 * filter_mult, 3, strides=2, padding='same', activation='relu', name='conv3')(x)
-    x = Conv2D(32 * filter_mult, 3, strides=2, padding='same', activation='relu', name='conv4')(x)
-    x = Conv2D(64 * filter_mult, 3, strides=2, padding='same', activation='relu', name='conv5')(x)
-    x = Conv2D(64 * filter_mult, 3, strides=2, padding='same', activation='relu', name='conv6')(x)
-    x = Conv2D(128 * filter_mult, 3, strides=2, padding='same', activation='relu', name='conv7')(x)
+    s = Input(input_shape, name='layer-0_input')  # s = stimulus
+    x = Conv2D(16 * filter_mult, 3, strides=2, padding='same', activation='relu', name='layer-1_conv')(s)
+    x = Conv2D(16 * filter_mult, 3, strides=2, padding='same', activation='relu', name='layer-2_conv')(x)
+    x = Conv2D(32 * filter_mult, 3, strides=2, padding='same', activation='relu', name='layer-3_conv')(x)
+    x = Conv2D(32 * filter_mult, 3, strides=2, padding='same', activation='relu', name='layer-4_conv')(x)
+    x = Conv2D(64 * filter_mult, 3, strides=2, padding='same', activation='relu', name='layer-5_conv')(x)
+    x = Conv2D(64 * filter_mult, 3, strides=2, padding='same', activation='relu', name='layer-6_conv')(x)
+    x = Conv2D(128 * filter_mult, 3, strides=2, padding='same', activation='relu', name='layer-7_conv')(x)
 
-    x = GlobalAveragePooling2D(name='globalpooling8')(x)
-    y = Dense(units=n_classes, activation='softmax', name='dense9')(x)
+    x = GlobalAveragePooling2D(name='layer-7_globalpool')(x)
+    y = Dense(units=n_classes, activation='softmax', name='layer-8_fc')(x)
     
     model = Model(inputs=s, outputs=y, name='PikeNet')
     return model
