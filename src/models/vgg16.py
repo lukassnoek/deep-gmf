@@ -47,7 +47,8 @@ def VGG16(input_shape=(256, 256, 3), n_classes=4):
     n_conv_ = [2, 2, 3, 3, 3]
     layer = 1
     for block, (filters, n_conv) in enumerate(zip(filters_, n_conv_)):
-        x = ConvBlock(filters, n_conv, 3, block=block+1, layer=layer)(x)
+        kernel_size = 7 if layer == 1 else 3
+        x = ConvBlock(filters, n_conv, kernel_size, block=block+1, layer=layer)(x)
         layer += n_conv
 
     # Classification block

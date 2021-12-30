@@ -1,7 +1,7 @@
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Input, Conv2D, Activation, Dense
 from tensorflow.keras.layers import BatchNormalization, MaxPooling2D, Add
-from tensorflow.python.keras.layers.pooling import GlobalAveragePooling2D
+from tensorflow.keras.layers import GlobalAveragePooling2D
 
 
 def ResBlock(filters, kernel_size=3, stride=2, bn_momentum=0.01, block=1):
@@ -65,7 +65,7 @@ def ResBlock(filters, kernel_size=3, stride=2, bn_momentum=0.01, block=1):
     return apply
 
 
-def ResNet10(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.01):
+def ResNet10(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.01, include_top=True):
     """ ResNet10 model.
     
     Parameters
@@ -104,17 +104,20 @@ def ResNet10(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.01):
     x = GlobalAveragePooling2D(name='layer-9_globalpool')(x)
 
     # Add classification head
-    if n_classes == 2:
-        y = Dense(1, activation='sigmoid', name='layer-10_fc')(x)
+    if include_top:
+        if n_classes == 2:
+            y = Dense(1, activation='sigmoid', name='layer-10_fc')(x)
+        else:
+            y = Dense(n_classes, activation='softmax', name='layer-10_fc')(x)
     else:
-        y = Dense(n_classes, activation='softmax', name='layer-10_fc')(x)
+        y = x
 
     # Create model
     model = Model(inputs=s, outputs=y, name='ResNet10')
     return model
 
 
-def ResNet6(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.01):
+def ResNet6(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.01, include_top=True):
     """ ResNet6 model.
     
     Parameters
@@ -153,10 +156,10 @@ def ResNet6(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.01):
     x = GlobalAveragePooling2D(name='layer-5_globalpool')(x)
 
     # Add classification head
-    if n_classes == 2:
-        y = Dense(1, activation='sigmoid', name='layer-6_fc')(x)
-    else:
+    if include_top:
         y = Dense(n_classes, activation='softmax', name='layer-6_fc')(x)
+    else:
+        y = x
 
     # Create model
     model = Model(inputs=s, outputs=y, name='ResNet6')
