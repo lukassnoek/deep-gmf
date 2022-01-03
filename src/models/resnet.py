@@ -65,7 +65,7 @@ def ResBlock(filters, kernel_size=3, stride=2, bn_momentum=0.01, block=1):
     return apply
 
 
-def ResNet10(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.01, include_top=True):
+def ResNet10(input_shape=(224, 224, 3), bn_momentum=0.01):
     """ ResNet10 model.
     
     Parameters
@@ -102,22 +102,14 @@ def ResNet10(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.01, include_t
 
     # Average feature maps per filter (resulting in 512 values)
     x = GlobalAveragePooling2D(name='layer-9_globalpool')(x)
-
-    # Add classification head
-    if include_top:
-        if n_classes == 2:
-            y = Dense(1, activation='sigmoid', name='layer-10_fc')(x)
-        else:
-            y = Dense(n_classes, activation='softmax', name='layer-10_fc')(x)
-    else:
-        y = x
-
+    
     # Create model
-    model = Model(inputs=s, outputs=y, name='ResNet10')
+    model = Model(inputs=s, outputs=x, name='ResNet10')
+    
     return model
 
 
-def ResNet6(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.01, include_top=True):
+def ResNet6(input_shape=(224, 224, 3), bn_momentum=0.01, n_classes=None, include_top=False):
     """ ResNet6 model.
     
     Parameters
@@ -154,21 +146,16 @@ def ResNet6(input_shape=(224, 224, 3), n_classes=4, bn_momentum=0.01, include_to
 
     # Average feature maps per filter (resulting in 512 values)
     x = GlobalAveragePooling2D(name='layer-5_globalpool')(x)
+    
+    # There is no classification top/head by default!
+    model = Model(inputs=s, outputs=x, name='ResNet6')
 
-    # Add classification head
-    if include_top:
-        y = Dense(n_classes, activation='softmax', name='layer-6_fc')(x)
-    else:
-        y = x
-
-    # Create model
-    model = Model(inputs=s, outputs=y, name='ResNet6')
     return model
 
 
 if __name__ == '__main__':
 
     # Initialize and compile model
-    model = ResNet10(n_classes=4)
+    model = ResNet6()
     model.compile(optimizer='adam', loss='categorical_crossentropy', metrics='accuracy')
     print(model.summary())

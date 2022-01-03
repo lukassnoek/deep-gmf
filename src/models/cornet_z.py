@@ -3,10 +3,10 @@ from tensorflow.keras.layers import Input, Conv2D, Dense
 from tensorflow.keras.layers import MaxPooling2D, GlobalAveragePooling2D
 
 
-def CORnet_Z(input_shape=(224, 224, 3), n_classes=4, include_top=True):
+def CORnet_Z(input_shape=(224, 224, 3)):
     """ CORnet_Z model (Kubilius et al., 2018, BioRxiv, 
     https://doi.org/10.1101/408385).
-    
+
     Parameters
     ----------
     input_shape : tuple
@@ -46,16 +46,8 @@ def CORnet_Z(input_shape=(224, 224, 3), n_classes=4, include_top=True):
     # 7 x 7 x 512 (globalavpool) -> 512 -> C
     x = GlobalAveragePooling2D(name='layer-4_globalpool')(x)
     
-    if include_top:
-        if n_classes == 2:
-            y = Dense(1, activation='sigmoid', name='layer-5_fc')(x)
-        else:
-            y = Dense(n_classes, activation='softmax', name='layer-5_fc')(x)
-    else:
-        y = x
-
-    # Create model
-    model = Model(inputs=s, outputs=y, name='CORnet-Z')
+    # Create model (no head; use `src.models.utils.add_head` for this)
+    model = Model(inputs=s, outputs=x, name='CORnet-Z')
     return model
 
 

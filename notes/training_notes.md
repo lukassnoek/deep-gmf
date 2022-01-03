@@ -12,3 +12,8 @@ Notes on traning CNNs on the data from Daube et al. (2021).
   * Problem is the default momentum parameter (0.99); because of no bias correction?
   * Setting momentum lower (e.g., 0.5) helps, and smaller batch size too ( = more steps, more updating)
   * "Optimal parameters" (val accuracy > 0.9 after three epochs of 2^14 = 16384 samples): bn_momentum = 0.1, batch size = 64
+
+### 30 Dec 2021
+
+* Distributed training is slower (and less accurate) than single-GPU ...
+* Small batch sizes (e.g. 256) are both quicker and more accurate on single GPU
