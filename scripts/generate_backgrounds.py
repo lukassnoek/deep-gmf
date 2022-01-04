@@ -12,7 +12,7 @@ from scipy.ndimage import gaussian_filter
 
 
 def phase_scramble_image(img_path, out_path, grayscale=True, shuffle_phase=True,
-                         smooth=None):
+                         smooth=None, is_image=False):
     """ Phase scrambles a 2D (RGB[A]) image. 
     
     Parameters
@@ -30,12 +30,16 @@ def phase_scramble_image(img_path, out_path, grayscale=True, shuffle_phase=True,
         How much to smooth the phase scrambled image (default: None, no smoothing)          
     """
     
-    img = Image.open(img_path)
-    if grayscale:
-        img = img.convert('L')
+    if is_image:
+        img = Image.open(img_path)
+        if grayscale:
+            img = img.convert('L')
 
-    # Rescale to 0-1 range
-    img = np.array(img).astype(float)
+        img = np.array(img).astype(float)
+    else:
+        img = img_path 
+    
+    # Rescale to 0-1 range   
     img /= 255.
 
     if img.shape[2] == 4:
@@ -75,12 +79,15 @@ def phase_scramble_image(img_path, out_path, grayscale=True, shuffle_phase=True,
 
     # Rescale back to 0-255 range
     img_scr = np.uint8(img_scr * 255).squeeze()
-    Image.fromarray(img_scr).save(out_path)
+    if is_image:
+        Image.fromarray(img_scr).save(out_path)
+    else:
+        return img_scr
 
 
 if __name__ == '__main__':
     
-    for i in range(3):
+    for i in range(10):
         f_out = f'data/background_{i+1}.png'
         phase_scramble_image('scripts/test.png', f_out, shuffle_phase=False, grayscale=False)
     

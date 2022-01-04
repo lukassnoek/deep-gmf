@@ -10,6 +10,7 @@ MAPPING = {
     'zr': {'0': -45, '1': 0, '2': 45},
     'xt': {'0': -150, '1': 0, '2': 150},   
     'yt': {'0': -150, '1': 0, '2': 150},
+    'zt': {'0': -220, '1': -60, '2': 100},
     'l': {'0': '0front', '1': '1above', '2': '2below',
         '3': '3left', '4': '4right'}
 }
@@ -19,23 +20,24 @@ MAPPING = {
 def main(dataset_name):
 
     data_dir = Path(f'/analyse/Project0257/lukas/data/{dataset_name}')
-    files = data_dir.glob('**/*.png')
+    files = data_dir.glob('**/*.jpg')
     info = defaultdict(list)
+    
     for f in tqdm(files):
         info['filename'].append(f)
         f = str(f).split(f'{dataset_name}/')[1]
-        parts = f.replace('/', '_').replace('.png', '').split('_')
+        parts = f.replace('/', '_').replace('.jpg', '').split('_')
         for part in parts:    
             k, v = part.split('-')
             if k in MAPPING.keys():
                 v = MAPPING[k][v]
 
             info[k].append(v) 
-
+            
     df = pd.DataFrame.from_dict(info)
     df = df.sort_values(by=['id', 'gender', 'ethn', 'age', 'bg',
-                            'xr', 'yr', 'zr', 'xt', 'yt', 'l'], axis=0)
-    #print(df)
+                            'xr', 'yr', 'zr', 'xt', 'yt', 'zt', 'l'], axis=0)
+
     df.to_csv(data_dir / 'dataset_info.csv', index=False)
     corrs = pd.get_dummies(df.drop('filename', axis=1)).corr()
     print(corrs.round(3))

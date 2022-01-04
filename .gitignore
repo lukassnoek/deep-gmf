@@ -131,4 +131,6 @@ dmypy.json
 # Custom
 logs
 models
+results
 **/.vscode
+

@@ -43,14 +43,13 @@ ctx.transform_lights(0, 0, 0, order='xyz')
 adata.attach(ctx)
 
 # Generation parameters
-N_IDS = 4
+N_IDS = 8
 GENDERS = ['F', 'M']
 ETHNS = ['WC', 'BA', 'EA']
 AGES = [20, 40]
 BGS = [0, 1]  # backgrounds
 
 # Rotations (RS) and translations (TS)
-# Note: no translations in Z for now
 XRS = [(0, -45), (1, 0), (2, 45)]
 YRS = [(0, -45), (1, 0), (2, 45)]
 ZRS = [(0, -45), (1, 0), (2, 45)]
@@ -59,7 +58,7 @@ YTS = [(0, -55), (1, 0), (2, 55)]
 ZTS = [(0, -220), (1, -60), (2, 100)]
 
 # Expressions
-EXPS = [(0, ('AU6', 'AU12')), (1, []), (2, ('AU9', 'AU10Open'))]
+#EXPS = [(0, ('AU6', 'AU12')), (1, []), (2, ('AU9', 'AU10Open'))]
 
 # Light rotations
 XYZ_LIGHTS = [
@@ -104,13 +103,13 @@ for gender, ethn, age in id_params:
                           basenf=base_nf, tdet=tdet)
         nf.attach(ctx)  # attach to openGL context
         
-        stim_params = product(BGS, XRS, YRS, ZRS, ZTS, XYZ_LIGHTS, EXPS)
-        for bg, xr, yr, zr, zt, (i_xyzl, xyzl), (i_exp, exp) in stim_params:
+        stim_params = product(BGS, XRS, YRS, ZRS, ZTS, XYZ_LIGHTS)#, EXPS)
+        for bg, xr, yr, zr, zt, (i_xyzl, xyzl) in stim_params:#, (i_exp, exp) in stim_params:
             (ixr, xr), (iyr, yr), (izr, zr) = [xr, yr, zr]
             (izt, zt) = zt
         
-            for au in exp:
-                adata.bshapes[au] = 1.
+            #for au in exp:
+            #    adata.bshapes[au] = 1.
         
             # Reset to default position and apply actual translation/rotation
             nf.transform_model(0, 0, 0, [0, 0, 0], order='txyz', replace=True)
@@ -135,12 +134,12 @@ for gender, ethn, age in id_params:
             
                 # Save to disk
                 img = Image.fromarray(img_arr)
-                f_out = this_out_dir / f'bg-{bg}_xr-{ixr}_yr-{iyr}_zr-{izr}_xt-{ixt}_yt-{iyt}_zt-{izt}_l-{i_xyzl}_exp-{i_exp}.png'
+                f_out = this_out_dir / f'bg-{bg}_xr-{ixr}_yr-{iyr}_zr-{izr}_xt-{ixt}_yt-{iyt}_zt-{izt}_l-{i_xyzl}.jpg'#_exp-{i_exp}.png'
                 Path(f_out).parent.mkdir(parents=True, exist_ok=True)
-                img.save(str(f_out))
+                img.convert('RGB').save(str(f_out))  # convert RGBA -> RGB in order to save as JPG
             
-            for au in exp:
-                adata.bshapes[au] = 0.
+            #for au in exp:
+            #    adata.bshapes[au] = 0.
             
         nf.detach()
         current_id += 1

@@ -6,7 +6,7 @@ from pathlib import Path
 
 DATASETS = {
     'gmf': Path('/analyse/Project0257/lukas/data/gmf'),
-    'gmfmini': Path('/analyse/Project0257/lukas/data/gmfmini')
+    'gmf_random': Path('/analyse/Project0257/lukas/data/gmf_random'),    
 }
 
 # CATegorical variables & CONTinuous variables
@@ -15,7 +15,7 @@ CONT_COLS = ['xr', 'yr', 'zr', 'xt', 'yt', 'zt']
 
 
 def create_dataset(df, X_col='filename', Y_col='id', Z_col=None, batch_size=256,
-                 target_size=(224, 224, 3), validation_split=None, shuffle=True):
+                   target_size=(224, 224, 3), validation_split=None, shuffle=True):
     
     # Shuffle rows of dataframe; much faster than
     # shuffling the Dataset object
@@ -46,8 +46,8 @@ def create_dataset(df, X_col='filename', Y_col='id', Z_col=None, batch_size=256,
                 ds = dataset_files.map(
                     lambda f: tf.py_function(
                         func=_load_3d_data, inp=[f, col], Tout=tf.float32,
-                        num_parallel_calls=tf.data.AUTOTUNE
-                    )
+                    ),
+                    num_parallel_calls=tf.data.AUTOTUNE
                 )
                 ds_tmp[name] += (ds,)
                 continue  # skip rest of function
@@ -117,7 +117,7 @@ def _preprocess_img(file, target_size):
     """ Image-to-tensor (plus some preprocessing).
     To be used in dataset.map(). """
     img = tf.io.read_file(file)
-    img = tf.io.decode_png(img, channels=3)
+    img = tf.io.decode_jpeg(img, channels=3)
     img = tf.image.resize(img, [*target_size[:2]])
     img = img / 255.  # rescale
     return img
