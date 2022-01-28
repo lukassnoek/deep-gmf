@@ -1,7 +1,5 @@
 tensorflow==2.7.0  # also installs numpy
-tensorflow-addons  # for GroupNorm
 pandas>=1.3.3
 click
-#cupy-cuda112
-#himalaya>=0.3.1
 matplotlib
+seaborn

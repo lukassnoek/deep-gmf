@@ -1,5 +1,5 @@
 from tensorflow.keras import Model
-from tensorflow.keras.layers import Input, Conv2D, Activation, Dense
+from tensorflow.keras.layers import Input, Conv2D, Activation
 from tensorflow.keras.layers import BatchNormalization, MaxPooling2D, Add
 from tensorflow.keras.layers import GlobalAveragePooling2D
 
@@ -109,15 +109,13 @@ def ResNet10(input_shape=(224, 224, 3), bn_momentum=0.01):
     return model
 
 
-def ResNet6(input_shape=(224, 224, 3), bn_momentum=0.01, n_classes=None, include_top=False):
+def ResNet6(input_shape=(224, 224, 3), bn_momentum=0.01):
     """ ResNet6 model.
     
     Parameters
     ----------
     input_shape : tuple
         Tuple with length 3 (x, y, channels)
-    n_classes : int
-        Number of output classes
     bn_momentum : float
         Momentum used for batch norm layers
 

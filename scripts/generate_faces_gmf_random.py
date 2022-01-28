@@ -3,10 +3,9 @@ import os
 os.environ['DISPLAY'] = ':0.0'
 import shutil
 import numpy as np
+from collections import defaultdict
 from PIL import Image
 from pathlib import Path
-from itertools import product
-from tqdm import tqdm
 from skimage import transform
 from GFG import Ctx
 from GFG.model import Nf, Adata
@@ -84,7 +83,8 @@ for i in range(1000):
     nf = idm.generate(v_coeff, t_coeff, ethnicity=ethn, gender=gender, age=age,
                       basenf=base_nf, tdet=tdet)
     nf.attach(ctx)  # attach to openGL context
-        
+
+    params = defaultdict(list)
     for ii in range(8192):  # 2**13
         xr = np.random.uniform(*XRS)
         yr = np.random.uniform(*YRS)
@@ -100,7 +100,7 @@ for i in range(1000):
         nf.transform_model(xr, yr, zr, [0, 0, zt], order='xyzt', replace=False)
 
         ctx.set_lights(Path(ROOT / 'lights.yaml'))
-        #ctx.transform_lights(lx, ly, 0, [0, 0, 0])
+        ctx.transform_lights(lx, ly, 0, [0, 0, 0])
 
         # Render + alpha blend img & background
         img_orig = ctx.render(dest='image')
@@ -110,17 +110,19 @@ for i in range(1000):
         img_arr *= 255
 
         img_rgb, img_a = img_arr[..., :3], img_arr[..., 3, None] / 255.
-        bg_rgb = phase_scramble_image(img_rgb, out_path=None, grayscale=False, shuffle_phase=False,
+        bg_rgb = phase_scramble_image(img_rgb.copy(), out_path=None, grayscale=False, shuffle_phase=False,
                                       smooth=None, is_image=False)
         img_arr = (img_rgb * img_a) + (bg_rgb * (1 - img_a))  # alpha blend
 
         # Save to disk
-        img_arr = img_rgb.astype(np.uint8)
+        img_arr = img_arr.astype(np.uint8)
         img = Image.fromarray(img_arr)
         f_out = this_out_dir / f'{str(ii).zfill(5)}.jpg'
         Path(f_out).parent.mkdir(parents=True, exist_ok=True)
-        #img.convert('RGB').save(str(f_out))
         img.save(str(f_out)) 
+        
+        bg_img = Image.from_array(bg_rgb.astype(np.uint))
+        params[]
                       
     nf.detach()
     current_id += 1

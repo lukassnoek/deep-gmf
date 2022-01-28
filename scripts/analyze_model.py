@@ -8,13 +8,12 @@ from pathlib import Path
 from collections import defaultdict
 from tensorflow.keras import Model
 from tensorflow.keras.models import load_model
-import matplotlib.pyplot as plt
 
 sys.path.append('.')
 from src.models import MODELS
-from src.io import create_dataset, DATASETS
+from src.io import create_dataset_test, DATASETS
 from src.layers import CKA
-
+from src.losses import AngleLoss
 
 F_NAMES = {
     'bg': 'background',
@@ -35,57 +34,67 @@ F_NAMES = {
 
 @click.command()
 @click.argument('model_name', type=click.Choice(MODELS.keys()))
-@click.argument('target', type=click.STRING, default='id')
+@click.option('-t', '--target', type=click.STRING, default=['id'], multiple=True)
 @click.option('-n', '--n-samples', type=click.INT, default=512)
-def main(model_name, target, n_samples):
+@click.option('--n-id-test', type=click.INT, default=None)
+@click.option('--cpu', is_flag=True)
+def main(model_name, target, n_samples, n_id_test, cpu):
 
     info = pd.read_csv(Path(DATASETS['gmf']) / 'dataset_info.csv')
-    info = info.sample(n=n_samples, replace=False)
-    info = info.sort_values(by=['bg', 'id', 'ethn', 'age', 'xr', 'yr', 'zr', 'xt', 'yt', 'zt', 'l'],
+    info = info.sort_values(by=['bg', 'id', 'ethn', 'gender', 'age', 'xr', 'yr', 'zr', 'xt', 'yt', 'zt', 'l'],
                             axis=0)
-
-    dataset = create_dataset(info, Y_col=target, Z_col=['shape', 'tex'], validation_split=None,
-                             target_size=(224, 224), batch_size=n_samples, shuffle=False)
-
-    (X, shape, tex), _ = dataset.__iter__().get_next()
     
-    # Load model and filter layers
-    full_model_name = f'{model_name}_dataset-gmf_target-{target}'
-    model = load_model(f'models/{full_model_name}')
-    layers = [l for l in model.layers if 'shortcut' not in l.name]
-    factors = ['id', 'ethn', 'age', 'bg', 'xr', 'yr', 'zr', 'xt', 'yt', 'zt', 'l']
+    ctx = '/cpu:0' if cpu else '/gpu:0'
+    with tf.device(ctx):
+        
+        dataset, df_test = create_dataset_test(info, n_samples=n_samples, batch_size=n_samples,
+                                    n_id_test=n_id_test)
 
-    results = defaultdict(list)
-    for layer in tqdm(layers):
+        X, tex, shape = dataset.__iter__().get_next()
+        
+        # Load model and filter layers
+        full_model_name = f"{model_name}_dataset-gmf_target-{'+'.join(target)}"
+        model = load_model(f'models/{full_model_name}', custom_objects={'AngleLoss': AngleLoss})
+        
+        layers = [l for l in model.layers if 'shortcut' not in l.name]
+        factors = ['id', 'ethn', 'gender', 'age', 'bg', 'xr', 'yr', 'zr', 'xt', 'yt', 'zt', 'l']
 
-        extractor = Model(inputs=model.inputs, outputs=[layer.output])
-        a_N = extractor.predict(X, batch_size=n_samples)
-        a_N = tf.reshape(a_N, (n_samples, -1))
+        results = defaultdict(list)
+        for op_nr, layer in enumerate(tqdm(layers)):
 
-        for v in factors + [('shape', shape), ('tex', tex)]:
-            if isinstance(v, str):
-                a_F = pd.get_dummies(info.loc[:, v]).to_numpy()
-            else:
-                v, a_F = v
- 
-            a_F = tf.convert_to_tensor(a_F, dtype=tf.float32)
-            cka = CKA()
-            r = np.round(cka(a_N, a_F).numpy(), 4)
-            results['corr'].append(r)
-            results['factor'].append(v)
-            if 'layer' in layer.name:
-                layer_nr = layer.name.split('_')[0].split('-')[1]
-                op_type = layer.name.split('_')[-1]
-                results['layer'].append(layer_nr)
-                results['operation'].append(op_type)
-            else:
-                # Must be logits
-                results['layer'].append(int(layer_nr) + 1)
-                results['operation'].append('logits')            
+            # Note to self: predict_step avoid warning that you get
+            # when calling predict (but does the same)
+            extractor = Model(inputs=model.inputs, outputs=[layer.output])
+            a_N = extractor.predict_step(X)    
+            a_N = tf.reshape(a_N, (n_samples, -1))
 
-    df = pd.DataFrame(results)
-    df.to_csv(f'results/{full_model_name}.tsv', sep='\t', index=False)
-    
+            for v in factors + [('shape', shape), ('tex', tex)]:
+                if isinstance(v, str):
+                    a_F = pd.get_dummies(df_test.loc[:, v]).to_numpy()
+                else:
+                    v, a_F = v
+
+                a_F = tf.convert_to_tensor(a_F, dtype=tf.float32)
+        
+                cka = CKA()
+                r = np.round(cka(a_N, a_F).numpy(), 4)
+                results['corr'].append(r)
+                results['factor'].append(v)
+                if 'layer' in layer.name:
+                    layer_nr = layer.name.split('_')[0].split('-')[1]
+                    op_type = layer.name.split('_')[-1]
+                    results['layer'].append(layer_nr)
+                    results['operation'].append(op_type)
+                else:
+                    # Must be logits
+                    results['layer'].append(int(layer_nr) + 1)
+                    results['operation'].append('logits')            
+
+                results['op_nr'].append(op_nr)
+
+        df = pd.DataFrame(results)
+        df.to_csv(f'results/{full_model_name}.tsv', sep='\t', index=False)
+        
 
 
 if __name__ == '__main__':

@@ -14,10 +14,14 @@ class AngleLoss(Loss):
     is_degree : bool
         Whether the labels are encoded as degrees (if True)
         or radians (if False). In case of the former, the
-        labels (and predictions) are converted to radians first.    
+        labels (and predictions) are converted to radians first
+    name : str
+        Name of loss function
+    kwargs : kwargs
+        Keyword arguments to be passed to parent Loss object initialization
     """
-    def __init__(self, absolute=False, is_degree=True, name='angle_loss'):
-        super().__init__(name=name)
+    def __init__(self, absolute=False, is_degree=True, name='angle_loss', **kwargs):
+        super().__init__(name=name, **kwargs)
         self.absolute = absolute
         self.is_degree = is_degree
         
@@ -45,8 +49,8 @@ class CkaLoss(Loss):
     it can be used to make Z1 and Z2 similar!
     """
 
-    def __init__(self, inverse=False):
-        super().__init__()
+    def __init__(self, inverse=False, **kwargs):
+        super().__init__(**kwargs)
         self.inverse = inverse
 
     def call(self, Z1, Z2):
@@ -72,8 +76,8 @@ class EuclideanRdmLoss(Loss):
     it can be used to make Z1 and Z2 similar!
     """
 
-    def __init__(self, inverse=False):
-        super().__init__()
+    def __init__(self, inverse=False, **kwargs):
+        super().__init__(**kwargs)
         self.inverse = inverse    
     
     def loss(self, Z1, Z2):

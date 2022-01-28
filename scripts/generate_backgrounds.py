@@ -30,7 +30,7 @@ def phase_scramble_image(img_path, out_path, grayscale=True, shuffle_phase=True,
         How much to smooth the phase scrambled image (default: None, no smoothing)          
     """
     
-    if is_image:
+    if not is_image:
         img = Image.open(img_path)
         if grayscale:
             img = img.convert('L')
@@ -89,6 +89,6 @@ if __name__ == '__main__':
     
     for i in range(10):
         f_out = f'data/background_{i+1}.png'
-        phase_scramble_image('scripts/test.png', f_out, shuffle_phase=False, grayscale=False)
+        phase_scramble_image('scripts/test.png', f_out, shuffle_phase=False, grayscale=False, is_image=False)
     
     

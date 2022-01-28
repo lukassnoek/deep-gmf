@@ -3,11 +3,12 @@ import click
 import os.path as op
 import pandas as pd
 import tensorflow as tf
+from tensorflow.keras import callbacks
 from tensorflow.keras.optimizers import Adam
 
 sys.path.append('.')
 from src.models import MODELS
-from src.models.utils import add_head
+from src.models.utils import EarlyStoppingOnLoss, add_head
 from src.losses import AngleLoss
 from src.io import create_dataset, DATASETS
 
@@ -23,25 +24,38 @@ TARGET_INFO = {
     'zr': {'n_out': 1, 'loss': AngleLoss(), 'metric': None, 'weight': 1},
     'xt': {'n_out': 1, 'loss': 'mse', 'metric': 'mae', 'weight': 0.001},
     'yt': {'n_out': 1, 'loss': 'mse', 'metric': 'mae', 'weight': 0.001},
+    'zt': {'n_out': 1, 'loss': 'mse', 'metric': 'mae', 'weight': 0.001}, 
 }
 
 
 @click.command()
 @click.argument('model_name', type=click.Choice(MODELS.keys()))
-@click.option('--dataset', type=click.STRING, default='gmfmini')
-@click.option('--target', type=click.STRING, default=['id'], multiple=True)
-@click.option('--validation-split', type=click.FLOAT, default=0.1)
+@click.option('--dataset', type=click.STRING, default='gmf')
+@click.option('-t', '--target', type=click.STRING, default=['id'], multiple=True)
 @click.option('--batch-size', type=click.INT, default=256)
+@click.option('--n-id-train', type=click.INT, default=None)
+@click.option('--n-id-val', type=click.INT, default=None)
 @click.option('--image-size', type=click.INT, default=224)
-@click.option('--epochs', type=click.INT, default=10)
-@click.option('--lr', type=click.FLOAT, default=0.001)
+@click.option('--epochs', type=click.INT, default=None)
+@click.option('--target-val-loss', type=click.FLOAT, default=0.1)
+@click.option('--lr', type=click.FLOAT, default=1e-4)
 @click.option('--n-gpu', type=click.INT, default=1)
-def main(model_name, dataset, target, validation_split, batch_size, image_size, epochs, lr, n_gpu):
-    """ Main training function. """
+def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
+         image_size, epochs, target_val_loss, lr, n_gpu):
+    """ Main training function.
+    
+    Parameters
+    ----------
+    model_name : str
+        Name of the model (architecture) to be used. Check src.models.__init__.py for the different
+        model names
+    dataset : str
+        Name of dataset (either 'gmf', 'gmfmini', or 'gmf_random')
+    
+    """
 
     # Load dataset info to pass to `create_dataset`
     info = pd.read_csv(op.join(DATASETS[dataset], 'dataset_info.csv'))
-    #info = info.query("id < 2")#sample(n=20_000)
 
     # Infer number of output variables, loss function(s), and metric(s)
     # for each target (may be >1)
@@ -50,7 +64,7 @@ def main(model_name, dataset, target, validation_split, batch_size, image_size, 
         if t not in TARGET_INFO:  # assume it's categorical!
             # Explicitly cast to str (so object -> categorical)
             info = info.astype({t: str})
-            n_out += (info[t].nunique(),)
+            n_out += (info.query("split == 'training'")[t].nunique(),)
             losses[t] = 'categorical_crossentropy'
             metrics[t] = 'accuracy'
             weights[t] = 1.
@@ -67,8 +81,9 @@ def main(model_name, dataset, target, validation_split, batch_size, image_size, 
 
     # Create training and validation set with a specific target variable(s)
     target_size = (image_size, image_size, 3)
-    train, val = create_dataset(info, Y_col=target, validation_split=validation_split,
-                                target_size=target_size, batch_size=batch_size)
+    train, val = create_dataset(info, Y_col=target, target_size=target_size,
+                                batch_size=batch_size, n_id_train=n_id_train,
+                                n_id_val=n_id_val)
 
     # For multiple GPU training!
     with strategy.scope():  
@@ -81,9 +96,16 @@ def main(model_name, dataset, target, validation_split, batch_size, image_size, 
         opt = Adam(learning_rate=lr)
         model.compile(optimizer=opt, loss=losses, metrics=metrics, loss_weights=weights)
  
+    if epochs is None:
+        callbacks = [EarlyStoppingOnLoss(value=target_val_loss, monitor='val_loss')]
+        epochs = 200  # to be on the safe side
+    else:
+        callbacks = None
+ 
     # Train and save both model and history (loss/accuracy across epochs)
     steps_per_epoch = train.cardinality().numpy()  # need for nice stdout
-    history = model.fit(train, validation_data=val, epochs=epochs, steps_per_epoch=steps_per_epoch)
+    history = model.fit(train, validation_data=val, epochs=epochs,
+                        steps_per_epoch=steps_per_epoch, callbacks=callbacks)
     target = '+'.join(list(target))
     f_out = f'models/{model.name}_dataset-{dataset}_target-{target}'
     model.save(f_out)
