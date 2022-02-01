@@ -83,12 +83,12 @@ class EuclideanRdm(Rdm):
         
         Parameters
         ----------
-        Z1 : Tensor
+        a_N : Tensor
             Tensorflow Tensor with dims N (observations) x
             K (neurons)
-        Z2 : Tensor
+        a_F : Tensor
             Tensorflow Tensor with dims N (observations) x
-            K (neurons / variables)        
+            K (neurons / variables)
         """
         eps = tf.keras.backend.epsilon()
 

@@ -30,14 +30,14 @@ def phase_scramble_image(img_path, out_path, grayscale=True, shuffle_phase=True,
         How much to smooth the phase scrambled image (default: None, no smoothing)          
     """
     
-    if not is_image:
+    if is_image:
         img = Image.open(img_path)
         if grayscale:
             img = img.convert('L')
 
         img = np.array(img).astype(float)
     else:
-        img = img_path 
+        img = img_path.copy() 
     
     # Rescale to 0-1 range   
     img /= 255.
@@ -83,6 +83,11 @@ def phase_scramble_image(img_path, out_path, grayscale=True, shuffle_phase=True,
         Image.fromarray(img_scr).save(out_path)
     else:
         return img_scr
+
+
+def alpha_blend(img, bg):
+    pass
+    
 
 
 if __name__ == '__main__':

@@ -60,13 +60,23 @@ def main(model_name, target, n_samples, n_id_test, cpu):
         factors = ['id', 'ethn', 'gender', 'age', 'bg', 'xr', 'yr', 'zr', 'xt', 'yt', 'zt', 'l']
 
         results = defaultdict(list)
+        rdms = dict(feature=dict(), neural=dict())
+        cka = CKA()
         for op_nr, layer in enumerate(tqdm(layers)):
 
-            # Note to self: predict_step avoid warning that you get
+            if 'layer' in layer.name:
+                layer_nr = layer.name.split('_')[0].split('-')[1]
+                op_type = layer.name.split('_')[-1]
+            else:
+                layer_nr = int(layer_nr) + 1
+                op_type = 'logits'
+
+            # Note to self: predict_step avoids warning that you get
             # when calling predict (but does the same)
             extractor = Model(inputs=model.inputs, outputs=[layer.output])
             a_N = extractor.predict_step(X)    
-            a_N = tf.reshape(a_N, (n_samples, -1))
+            a_N = tf.reshape(a_N, (n_samples, -1))            
+            rdms['neural'][layer] = cka.get_rdm(a_N).numpy()
 
             for v in factors + [('shape', shape), ('tex', tex)]:
                 if isinstance(v, str):
@@ -75,27 +85,25 @@ def main(model_name, target, n_samples, n_id_test, cpu):
                     v, a_F = v
 
                 a_F = tf.convert_to_tensor(a_F, dtype=tf.float32)
-        
-                cka = CKA()
                 r = np.round(cka(a_N, a_F).numpy(), 4)
+                
                 results['corr'].append(r)
                 results['factor'].append(v)
-                if 'layer' in layer.name:
-                    layer_nr = layer.name.split('_')[0].split('-')[1]
-                    op_type = layer.name.split('_')[-1]
-                    results['layer'].append(layer_nr)
-                    results['operation'].append(op_type)
-                else:
-                    # Must be logits
-                    results['layer'].append(int(layer_nr) + 1)
-                    results['operation'].append('logits')            
-
+                results['layer'].append(layer_nr)
+                results['operation'].append(op_type)
                 results['op_nr'].append(op_nr)
 
+                if v not in rdms['feature'].keys():
+                    rdms['feature'][layer] = cka.get_rdm(a_F).numpy()
+                
         df = pd.DataFrame(results)
         df.to_csv(f'results/{full_model_name}.tsv', sep='\t', index=False)
         
-
+        for tpe in ['feature', 'neural']:
+            f_out = f'results/{full_model_name}_rdm-{tpe}.npz'
+            this_dict = rdms[tpe]
+            print(this_dict)
+            np.savez(f_out, **this_dict)
 
 if __name__ == '__main__':
 
