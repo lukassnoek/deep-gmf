@@ -1,4 +1,5 @@
 import sys
+import random
 import click
 import numpy as np
 import pandas as pd
@@ -41,15 +42,21 @@ F_NAMES = {
 def main(model_name, target, n_samples, n_id_test, cpu):
 
     info = pd.read_csv(Path(DATASETS['gmf']) / 'dataset_info.csv')
-    info = info.sort_values(by=['bg', 'id', 'ethn', 'gender', 'age', 'xr', 'yr', 'zr', 'xt', 'yt', 'zt', 'l'],
-                            axis=0)
+    df_test = info.query("split == 'testing'")
+    if n_id_test is not None:
+        # Select a subset of face IDs
+        ids = df_test['id'].unique().tolist()
+        ids = random.sample(ids, n_id_test)
+        df_test = df_test.query('id in @ids')
+
+    df_test = df_test.sample(n=n_samples)
+    df_test = df_test.sort_values(by=['bg', 'id', 'ethn', 'gender', 'age', 'xr', 'yr', 'zr', 'xt', 'yt', 'zt', 'l'],
+                                  axis=0)  # sort to get nice looking RDMs
     
     ctx = '/cpu:0' if cpu else '/gpu:0'
     with tf.device(ctx):
         
-        dataset, df_test = create_dataset_test(info, n_samples=n_samples, batch_size=n_samples,
-                                    n_id_test=n_id_test)
-
+        dataset = create_dataset_test(df_test, batch_size=n_samples)
         X, tex, shape = dataset.__iter__().get_next()
         
         # Load model and filter layers
@@ -76,7 +83,7 @@ def main(model_name, target, n_samples, n_id_test, cpu):
             extractor = Model(inputs=model.inputs, outputs=[layer.output])
             a_N = extractor.predict_step(X)    
             a_N = tf.reshape(a_N, (n_samples, -1))            
-            rdms['neural'][layer] = cka.get_rdm(a_N).numpy()
+            rdms['neural'][layer.name] = cka.get_rdm(a_N).numpy()
 
             for v in factors + [('shape', shape), ('tex', tex)]:
                 if isinstance(v, str):
@@ -89,12 +96,13 @@ def main(model_name, target, n_samples, n_id_test, cpu):
                 
                 results['corr'].append(r)
                 results['factor'].append(v)
+                results['layername'].append(layer.name)
                 results['layer'].append(layer_nr)
                 results['operation'].append(op_type)
                 results['op_nr'].append(op_nr)
 
                 if v not in rdms['feature'].keys():
-                    rdms['feature'][layer] = cka.get_rdm(a_F).numpy()
+                    rdms['feature'][v] = cka.get_rdm(a_F).numpy()
                 
         df = pd.DataFrame(results)
         df.to_csv(f'results/{full_model_name}.tsv', sep='\t', index=False)
@@ -102,7 +110,6 @@ def main(model_name, target, n_samples, n_id_test, cpu):
         for tpe in ['feature', 'neural']:
             f_out = f'results/{full_model_name}_rdm-{tpe}.npz'
             this_dict = rdms[tpe]
-            print(this_dict)
             np.savez(f_out, **this_dict)
 
 if __name__ == '__main__':

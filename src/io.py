@@ -15,16 +15,12 @@ CAT_COLS = ['id', 'ethn', 'age', 'gender', 'bg', 'l']
 CONT_COLS = ['xr', 'yr', 'zr', 'xt', 'yt', 'zt']
 
 
-def create_dataset_test(df, X_col='filename', n_samples=512, batch_size=256, target_size=(224, 224, 3), n_id_test=None):
-    """ Load test dataset. """
-
-    df_test = df.query("split == 'testing'")
-    if n_id_test is not None:
-        ids = df_test['id'].unique().tolist()
-        ids = random.sample(ids, n_id_test)
-        df_test = df_test.query('id in @ids')
-
-    df_test = df_test.sample(n=n_samples)
+def create_dataset_test(df_test, X_col='filename', batch_size=256, target_size=(224, 224, 3)):
+    """ Load test dataset. 
+    
+    Note to self: if you want nice-looking (sorted) RDMs, make sure to query and sort
+    the DataFrame (df_test) before calling this function.
+    """
 
     files = df_test[X_col].to_numpy()
     files_dataset = tf.data.Dataset.from_tensor_slices(files)
@@ -44,7 +40,7 @@ def create_dataset_test(df, X_col='filename', n_samples=512, batch_size=256, tar
     dataset = tf.data.Dataset.zip((dataset, *shape_tex))
     dataset = dataset.batch(batch_size, drop_remainder=True)
     dataset = dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
-    return dataset, df_test
+    return dataset
 
 
 def create_dataset(df, X_col='filename', Y_col='id', Z_col=None, batch_size=256,
