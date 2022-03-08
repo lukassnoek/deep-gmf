@@ -130,7 +130,6 @@ dmypy.json
 
 # Custom
 logs
-models
+trained_models
 results
 **/.vscode
-gmf_random

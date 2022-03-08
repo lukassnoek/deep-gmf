@@ -17,3 +17,10 @@ Notes on traning CNNs on the data from Daube et al. (2021).
 
 * Distributed training is slower (and less accurate) than single-GPU ...
 * Small batch sizes (e.g. 256) are both quicker and more accurate on single GPU
+
+### 2 Mar 2022
+Messing around with training models that predict shape (even just a single shape parameter) and trying to figure out how much data (separate identities and variations per identity) you need in order to train it to a reasonable degree of accuracy. A couple of observations:
+
+* You definitely need more than 1 variation per identity!
+* The model will, at some point, overfit to the training set, i.e., validation loss will halt and then increase at some point, but training loss will keep decreasing
+* Overfitting can, to some degree, be countered by training on more identities. E.g., when training on 1024 identities, validation cosine similarity will plateau at 0.5, training on 2048 identities will plateau at 0.6, etc. 

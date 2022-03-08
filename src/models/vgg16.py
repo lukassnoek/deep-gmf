@@ -29,10 +29,10 @@ def ConvBlock(filters, n_conv=2, kernel_size=3, block=1, layer=1):
         """ Apply operations to input tensor `x`. """        
         for i in range(1, n_conv+1):
             x = Conv2D(filters, kernel_size, activation='relu', padding='same',
-                       name=f'layer-{layer}_block-{block}_conv')(x)
+                       name=f'layer{layer}_block-{block}_conv')(x)
             layer += 1
         
-        x = MaxPooling2D(2, strides=2, name=f'layer-{layer-1}_block-{block}_pool')(x)
+        x = MaxPooling2D(2, strides=2, name=f'layer{layer-1}_block-{block}_pool')(x)
 
         return x
     
@@ -40,7 +40,7 @@ def ConvBlock(filters, n_conv=2, kernel_size=3, block=1, layer=1):
 
 
 def VGG16(input_shape=(224, 224, 3)):
-    s = Input(input_shape, name='layer-0_input')  # s = stimulus
+    s = Input(input_shape, name='layer0_input')  # s = stimulus
     x = s
 
     filters_ = [64, 128, 256, 512, 512]
@@ -51,9 +51,9 @@ def VGG16(input_shape=(224, 224, 3)):
         layer += n_conv
 
     # Classification block
-    x = Flatten(name=f'layer-{layer-1}_flatten')(x)  # flatten is part of last conv layer
-    x = Dense(units=4096, activation='relu', name=f'layer-{layer}_fc')(x)
-    x = Dense(units=4096, activation='relu', name=f'layer-{layer+1}_fc')(x)
+    x = Flatten(name=f'layer{layer-1}_flatten')(x)  # flatten is part of last conv layer
+    x = Dense(units=4096, activation='relu', name=f'layer{layer}_fc')(x)
+    x = Dense(units=4096, activation='relu', name=f'layer{layer+1}_fc')(x)
 
     model = Model(inputs=s, outputs=x, name='VGG16')
     return model

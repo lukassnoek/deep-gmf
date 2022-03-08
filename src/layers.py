@@ -1,5 +1,4 @@
 import tensorflow as tf
-import tensorflow_probability as tfp
 from tensorflow.keras.layers import Layer
 
 
@@ -27,7 +26,7 @@ class InvertGradient(Layer):
 
     
 class Rdm(Layer):
-    def __init__(self, add_loss_=False, batch_size=512):
+    def __init__(self, add_loss_=False, batch_size=512, add_loss=False, pearson=True):
         """ Representational Dissimilarity Matrix (RDM) layer. 
 
         Parameters
@@ -45,12 +44,31 @@ class Rdm(Layer):
         super().__init__()
         self.add_loss_ = add_loss_
         self.batch_size = batch_size
+        self.add_loss = add_loss
+        self.pearson = pearson
         self.rdm_N = None  # "Neural" RDM 
         self.rdm_F = None  # "Feature" RDM
 
     def call(self, a_N, a_F):
+       
+        self.rdm_N = self.get_rdm(a_N)
+        self.rdm_F = self.get_rdm(a_F)
+
+        if self.pearson:
+            l = self._pearson(
+                self._squareform(self.rdm_N),
+                self._squareform(self.rdm_F)
+            )
+
+        if self.add_loss_:
+            self.add_loss(l)
+            return self.rdm_N
+        else:
+            return l
+
+    def get_rdm(self, Z):
         raise NotImplementedError
-        
+     
     def _squareform(self, rdm):
         """Squareform operation (get upper triangle from matrix). """        
         ones = tf.ones_like(rdm)
@@ -78,65 +96,23 @@ class EuclideanRdm(Rdm):
     Vectorized Euclidean distance matrix implementation adapted from Samuel Albanie:
     https://www.robots.ox.ac.uk/~albanie/notes/Euclidean_distance_trick.pdf
     """
-    def call(self, a_N, a_F):
-        """ Computes Euclidean Distance matrix.
-        
-        Parameters
-        ----------
-        a_N : Tensor
-            Tensorflow Tensor with dims N (observations) x
-            K (neurons)
-        a_F : Tensor
-            Tensorflow Tensor with dims N (observations) x
-            K (neurons / variables)
-        """
+
+    def get_rdm(self, Z):
         eps = tf.keras.backend.epsilon()
-
-        Z_ = []
-        for Z in [a_N, a_F]:
-            g_Z = tf.matmul(Z, tf.transpose(Z))
-            diag_Z = tf.expand_dims(tf.linalg.diag_part(g_Z), 1)
-            d_Z = diag_Z + tf.transpose(diag_Z) - 2 * g_Z
-            d_Z = tf.sqrt(tf.maximum(d_Z, eps))  # avoid sqrt(<0)!
-            Z_.append(d_Z)
-            
-        self.rdm_N = Z_[0]
-        self.rdm_F = Z_[1]
-
-        l = self._pearson(self._squareform(Z_[0]),
-                          self._squareform(Z_[1]))
-
-        if self.add_loss_:
-            self.add_loss(l)
-            return self.rdm_N
-        else:
-            return l
+        g_Z = tf.matmul(Z, tf.transpose(Z))
+        diag_Z = tf.expand_dims(tf.linalg.diag_part(g_Z), 1)
+        d_Z = diag_Z + tf.transpose(diag_Z) - 2 * g_Z
+        return tf.sqrt(tf.maximum(d_Z, eps))  # avoid sqrt(<0)!
 
 
 class OneMinCorrRdm(Rdm):
     
-    def call(self, a_N, a_F):
-        
+    def get_rdm(self, Z):
         eps = tf.keras.backend.epsilon()
-        
-        Z_ = []
-        for Z in [a_N, a_F]:
-            # FIXME: does not work for maps with >100000 features
-            corr = tfp.stats.correlation(Z)
-            Z_.append(1 - corr)
-        
-        self.rdm_N = Z_[0]
-        self.rdm_F = Z_[1]
+        Zn = (Z - tf.reduce_mean(Z, axis=0)) / tf.math.reduce_std(Z, axis=0)
+        Zn = tf.where(tf.math.is_nan(Zn), tf.zeros_like(Zn), Zn)
+        return 1 - tf.matmul(Zn, Zn, transpose_b=True) / (Zn.shape[1] - 1)
 
-        l = self._pearson(self._squareform(Z_[0]),
-                          self._squareform(Z_[1]))
-
-        if self.add_loss_:
-            self.add_loss(l)
-            return self.rdm_N
-        else:
-            return l
-        
 
 class CKA(Rdm):
     def __init__(self, kernel='linear', **kwargs):

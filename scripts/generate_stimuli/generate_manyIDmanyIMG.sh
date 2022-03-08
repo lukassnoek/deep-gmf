@@ -1,0 +1,20 @@
+python scripts/generate_stimuli/generate_faces.py \
+    --out-dir /analyse/Project0257/lukas/data/gmf_manyIDmanyIMG \
+    --n-id 16384 \
+    --n-var 64 \
+    --genders M+F \
+    --ethns WC+EA \
+    --ages 25 50 \
+    --x-rot -30 30 \
+    --y-rot -30 30 \
+    --z-rot -30 30 \
+    --x-trans -100 100 \
+    --y-trans -100 100 \
+    --z-trans -100 100 \
+    --x-rot-lights -30 30 \
+    --y-rot-lights -30 30 \
+    --save-id-params \
+    --save-background \
+    --save-image-separately \
+    --camera-distance 500 \
+    --add-background

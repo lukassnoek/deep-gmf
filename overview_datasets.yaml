@@ -1,0 +1,6 @@
+fewIDmanyIMG:
+  n_id: 128
+  n_var_per_id: 1024
+  translation: False
+  background: False
+  camera_distance: 300

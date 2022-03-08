@@ -1,55 +1,51 @@
-import h5py
 import random
 import numpy as np
 import pandas as pd
 import tensorflow as tf
 from pathlib import Path
-from tensorflow.keras.layers import StringLookup
+from tensorflow.keras.layers import StringLookup, CategoryEncoding
 
-
-DATA_PATH = Path('/analyse/Project0257/lukas/data')
+DATASETS = {
+    'gmf': Path('/analyse/Project0257/lukas/data/gmf'),
+    'gmf_random': Path('/analyse/Project0257/lukas/data/gmf_random'),    
+}
 
 # CATegorical variables & CONTinuous variables
-CAT_COLS = ['id', 'ethn', 'gender']
-CONT_COLS = ['age', 'xr', 'yr', 'zr', 'xt', 'yt', 'zt', 'xl', 'yl', 'zl']
+CAT_COLS = ['id', 'ethn', 'age', 'gender', 'bg', 'l']
+CONT_COLS = ['xr', 'yr', 'zr', 'xt', 'yt', 'zt']
 
 
-def create_test_dataset(df_test, X_col='image_path', batch_size=256, target_size=(224, 224, 3), get_background=True):
+def create_dataset_test(df_test, X_col='filename', batch_size=256, target_size=(224, 224, 3)):
+    """ Load test dataset. 
+    
+    Note to self: if you want nice-looking (sorted) RDMs, make sure to query and sort
+    the DataFrame (df_test) before calling this function.
+    """
+
     files = df_test[X_col].to_numpy()
     files_dataset = tf.data.Dataset.from_tensor_slices(files)
     dataset = files_dataset.map(lambda f: _preprocess_img(f, target_size),
-                                  num_parallel_calls=tf.data.AUTOTUNE)
+                                num_parallel_calls=tf.data.AUTOTUNE)
     
-    shape_tex_bg = []
-    cols = ['shape', 'tex']
-    if get_background:
-        cols.append('backgrounds')
-
-    for col in ('shape', 'tex'):
+    shape_tex = []
+    for col in ('tex', 'shape'):
         ds = files_dataset.map(
             lambda f: tf.py_function(
-                func=_load_hdf_features, inp=[f, col, 0], Tout=tf.float32,
+                func=_load_3d_data, inp=[f, col], Tout=tf.float32,
             ),
             num_parallel_calls=tf.data.AUTOTUNE
         )
-        shape_tex_bg.append(ds)
-
-    dataset = tf.data.Dataset.zip((dataset, *shape_tex_bg))
+        shape_tex.append(ds)
+    
+    dataset = tf.data.Dataset.zip((dataset, *shape_tex))
     dataset = dataset.batch(batch_size, drop_remainder=True)
     dataset = dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
-    # Get rid of tf stdout vomit
-    options = tf.data.Options()
-    options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF
-    dataset = dataset.with_options(options)
-
     return dataset
 
 
-def create_dataset(df, X_col='image_path', Y_col='id', Z_col=None, batch_size=256,
-                   n_id_train=None, n_id_val=None, n_var_per_id=None, n_coeff=None,
-                   query=None, target_size=(224, 224, 3), shuffle=True, cache=False):
-
-    df = df.query("split != 'testing'")
+def create_dataset(df, X_col='filename', Y_col='id', Z_col=None, batch_size=256,
+                   n_id_train=None, n_id_val=None, target_size=(224, 224, 3),
+                   shuffle=True, cache=False):
 
     # Make sure Y_col and Z_col are lists by default
     if isinstance(Y_col, (type(None), str)):
@@ -58,43 +54,43 @@ def create_dataset(df, X_col='image_path', Y_col='id', Z_col=None, batch_size=25
     if isinstance(Z_col, (type(None), str)):
         Z_col = [Z_col]
     
+    # Shuffle rows of dataframe; much faster than
+    # shuffling the Dataset object!
+    if shuffle:
+        df = df.sample(frac=1)
+
+    # Note: split created here instead of using the 
+    # Dataset object, because using the DataFrame we
+    # can stratify the split according to ID
+    df_train = df.query("split == 'training'")
+
     if 'id' in Y_col:
-        # If we're classifying face ID, the subsample of
-        # face IDs should be the same in the train and val set
-        if n_id_train is not None:
-            n_id_val = n_id_train
-        
+        # If 'id' is one of the targets, we cannot
+        # stratify according to 'id', because that 
+        # will lead to unique 'id' values in the val set!
         if n_id_val is not None:
-            n_id_train = n_id_val
+            # We'll 'abuse' the n_id_val parameter to now 
+            # sample the number of observations for the val set!
+            df_val = df_train.sample(n=n_id_val)
+            df_train = df_train.drop(df_val.index, axis=0)
+        else:
+            # If there's no explicit number of obs for the val
+            # set, sample 10% of the train set (arbitrary frac)
+            df_val = df_train.sample(frac=0.1)
+            df_train = df_train.drop(df_val.index, axis=0)
 
-    if query is not None:
-        df = df.query(query)
-    
-    if 'id' in Y_col:
-        # If 'id' is one of the targets, we cannot stratify according
-        # to 'id', because that will lead to unique 'id' values in the val set!
-        if n_id_val is not None:  # `n_id_val`` always is the same as `n_id_train`
-            # Pick a subset of IDs
-            ids = df['id'].unique().tolist()
-            ids = random.sample(ids, n_id_val)
-            df = df.query('id in @ids')
-
-        # Frac is hardcoded-for now, maybe not a good idea
-        df_val = df.groupby('id').sample(frac=0.125)
-        df_train = df.drop(df_val.index, axis=0)
+        if n_id_train is not None:
+            # Again, abose the n_id_train parameter
+            df_train = df_train.sample(n=n_id_train)
 
         # Make sure the dfs are not again subsampled
         n_id_train = None
         n_id_val = None
     else:
-        # Note: split created here instead of using the 
-        # Dataset object, because using the DataFrame we
-        # can stratify the split according to ID
-        df_train = df.query("split == 'training'")
-
         # If 'id' is not a target, we can just nicely
         # stratify by ID (as done before in the script
-        # `aggregate_dataset_info.py`) using the existing split
+        # `aggregate_dataset_info.py`) using the existing
+        # split
         df_val = df.query("split == 'validation'")
 
     # Only relevant if 'id' is not a target!
@@ -110,34 +106,6 @@ def create_dataset(df, X_col='image_path', Y_col='id', Z_col=None, batch_size=25
         ids = random.sample(ids, n_id_val)
         df_val = df_val.query('id in @ids')
 
-    if n_var_per_id is not None:
-        # Select, per face ID, a specific number of images;
-        # this is useful for quick testing!
-        min_var_per_id = df_train.groupby('id').size().min()
-        if min_var_per_id < n_var_per_id:
-            raise ValueError(f"Cannot sample {n_var_per_id} per ID because "
-                             f"minimum number of variations is {min_var_per_id}!")
-
-        df_train = df_train.groupby('id').sample(n=n_var_per_id)
-        
-        # Only subsample the validation data if the number of images
-        # per ID is larger than `n_var_per_id` (not always the case when
-        # target is `id`!)
-        if np.min(df_val.groupby('id').size()) > n_var_per_id:
-            df_val = df_val.groupby('id').sample(n=n_var_per_id)
-
-    if df_train.shape[0] < batch_size:
-        raise ValueError(f"Train dataset has fewer samples {df_train.shape[0]} "
-                         f"than the requested batch size {batch_size}!")
-
-    if df_val.shape[0] < batch_size:
-        print(f"WARNING: number of validation samples ({df_val.shape[0]}) "
-              f"is smaller than the batch size ({batch_size})! "
-              f"Setting validation batch size to {df_val.shape[0]}.")
-        val_batch_size = df_val.shape[0]
-    else:
-        val_batch_size = batch_size
-
     # For categorical features (in Y or Z), we need to infer
     # the categories *on the full dataset* (here: `df_comb`),
     # otherwise we risk that the train and val set are encoded
@@ -147,25 +115,17 @@ def create_dataset(df, X_col='image_path', Y_col='id', Z_col=None, batch_size=25
     for col in list(Y_col) + list(Z_col):
         if col is not None:
             if col in CAT_COLS:
-                # Note to self: encode entire dataset (`df`) because otherwise
-                # test IDs may not be represented in the one-hot-encoding
-                df_comb = df_comb.astype({col: str})
+                df = df.astype({col: str})
                 # StringLookup converts strings to integers and then
                 # (with output_mode='one_hot') to a dummy representation
                 slu = StringLookup(output_mode='one_hot', num_oov_indices=0)
                 slu.adapt(df_comb[col].to_numpy())
                 cat_encoders[col] = slu
 
-    # Shuffle rows of dataframe; much faster than
-    # shuffling the Dataset object!
-    if shuffle:
-        df_train = df_train.sample(frac=1)
-        df_val = df_val.sample(frac=1)
-        
     train_val_datasets = []
-    for ds_name, df_ in [('training', df_train), ('validation', df_val)]:
+    for df in [df_train, df_val]:
         # `files` is a list with paths to images
-        files = df_[X_col].tolist()
+        files = df[X_col].tolist()
         
         # Note to self: Dataset.list_files automatically sorts the input,
         # undoing the df.sample randomization! So use from_tensor_slices instead
@@ -183,34 +143,31 @@ def create_dataset(df, X_col='image_path', Y_col='id', Z_col=None, batch_size=25
             for col in cols:
 
                 if col is None:
-                    # More often than not, there are no `Z` cols
                     continue
 
-                # shape/tex/3d are loaded from hdf5 file
-                # using a custom (non-tf) function
-                if col in ['shape', 'tex', 'background']:
-                    # Tensorflow cannot handle `None` values, so set to 0
-                    n_coeff = 0 if n_coeff is None else n_coeff
+                # shape/tex/3d are loaded from identity-specific
+                # npz file using a custom (non-tf) function
+                if col in ['shape', 'tex', '3d']:
                     ds = files_dataset.map(
                         lambda f: tf.py_function(
-                            func=_load_hdf_features, inp=[f, col, n_coeff], Tout=tf.float32,
+                            func=_load_3d_data, inp=[f, col], Tout=tf.float32,
                         ),
                         num_parallel_calls=tf.data.AUTOTUNE
                     )
-                    ds_tmp[name] += (ds,)  # add to temporary dataset tuple
+                    ds_tmp[name] += (ds,)
                     continue  # skip rest of block
                 
                 # Below is necessary because sometimes pandas
                 # treats numeric colums as object/str ...
                 if col in CAT_COLS:
-                    df_ = df_.astype({col: str})
+                    df = df.astype({col: str})
                 else:
-                    df_ = df_.astype({col: float})
+                    df = df.astype({col: float})
 
                 # Use df column as tensor slices, to be preprocessed
                 # in a way depending on whether it's a categorical or
                 # continuous variable
-                v = df_[col].to_numpy()  
+                v = df[col].to_numpy()  
                 ds = tf.data.Dataset.from_tensor_slices(v)
 
                 if col in CAT_COLS:
@@ -240,13 +197,9 @@ def create_dataset(df, X_col='image_path', Y_col='id', Z_col=None, batch_size=25
         # Merge inputs (X, Z) with outputs (Y)
         dataset = tf.data.Dataset.zip((X_dataset, ds_tmp['Y']))
     
-        # Optimization tricks (drop_remainder is necessary for multi-GPU
+        # Optimization tricks (drop_reminder is necessary for multi-GPU
         # training, don't know why)
-        if ds_name == 'training':
-            dataset = dataset.batch(batch_size, drop_remainder=True)
-        else:
-            dataset = dataset.batch(val_batch_size, drop_remainder=True)
-
+        dataset = dataset.batch(batch_size, drop_remainder=True)
         dataset = dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
 
         # Get rid of tf stdout vomit
@@ -259,7 +212,7 @@ def create_dataset(df, X_col='image_path', Y_col='id', Z_col=None, batch_size=25
 
         train_val_datasets.append(dataset)
 
-    # Return as tuple instead of list   
+    # Return as tuple    
     return train_val_datasets[0], train_val_datasets[1]
 
 
@@ -267,28 +220,22 @@ def _preprocess_img(file, target_size):
     """ Image-to-tensor (plus some preprocessing).
     To be used in dataset.map(). """
     img = tf.io.read_file(file)
-    img = tf.io.decode_png(img, channels=3)
+    img = tf.io.decode_jpeg(img, channels=3)
     img = tf.image.resize(img, [*target_size[:2]])
     img = img / 255.  # rescale
     return img
 
 
-def _load_hdf_features(f, feature, n_coeff):
+def _load_3d_data(f, col):
     f = f.numpy().decode('utf-8')
-    feature = feature.numpy().decode('utf-8')
-    with h5py.File(f.replace('image.png', 'features.h5'), 'r') as f_in:
-        data = f_in[feature][:].astype(np.float32)
-
-    if feature == 'tex' and n_coeff != 0:
-        data = data[:, :n_coeff]
-    
-    if feature == 'shape' and n_coeff != 0:
-        data = data[:n_coeff]
-
-    if feature in ('tex', 'background'):
-        data = data.flatten()
-    
-    return data
+    col = col.numpy().decode('utf-8')
+    data = np.load(str(Path(f).parent) + '.npz')
+    if col == '3d':
+        return np.r_[data['v_coeff'], data['t_coeff'].flatten()].astype(np.float32)
+    elif col == 'shape':
+        return data['v_coeff'].astype(np.float32)
+    else:
+        return data['t_coeff'].flatten().astype(np.float32)
 
 
 def create_mock_model(n_inp, n_out, in_shape=None, n_y=30):
@@ -317,12 +264,15 @@ def create_mock_model(n_inp, n_out, in_shape=None, n_y=30):
 
 if __name__ == '__main__':
     
-    df = pd.read_csv('/analyse/Project0257/lukas/data/gmf_manyIDfewIMG.csv')
-    train = create_dataset(
-        df, X_col='image_path', Y_col=['shape', 'tex'], Z_col=None, batch_size=256,
-        n_id_train=None, n_id_val=None, target_size=(224, 224, 3),
-        shuffle=True, cache=False
-    )
-    #model = create_mock_model(n_inp=1, n_out=1, in_shape=[(224, 224, 3)], n_y=1970)
-    #model.compile(optimizer='adam', loss='mse', metrics='cosine_similarity')
-    #model.fit(train, epochs=5)    
+    df = pd.read_csv('/analyse/Project0257/lukas/data/gmfmini/dataset_info.csv')
+    df = df.query("id == 1").astype({'id': str, 'age': str, 'bg': str, 'l': str})
+    train = create_dataset(df, Y_col='tex', validation_split=None)
+    model = create_mock_model(n_inp=1, n_out=1, in_shape=[(224, 224, 3)], n_y=1970)
+    model.compile(optimizer='adam', loss='mse', metrics='cosine_similarity')
+    model.fit(train, epochs=5)    
+    # import sys
+    # sys.path.append('.')
+    # from src.models import ResNet6
+    # model = ResNet6(n_classes=(30,))
+    # model.compile(optimizer='adam', loss='categorical_crossentropy', metrics='accuracy')
+    # model.fit(train, epochs=5)

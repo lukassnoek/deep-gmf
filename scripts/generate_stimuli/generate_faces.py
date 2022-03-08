@@ -36,6 +36,10 @@ lightopts = {
     'shadow': 4
 }
 
+ST = np.load('data/idm_St.npy')
+SV = np.load('data/idm_Sv.npy')
+
+
 @click.command('Main face generation API')
 @click.option('--options-file', help='Yaml file with options')
 @click.option('--out-dir', default='gmf_', show_default=True, help='Output directory')
@@ -68,10 +72,11 @@ lightopts = {
 @click.option('--renderscale', default=4., show_default=True, help='Render scale of image')
 @click.option('--camera-distance', default=400, show_default=True, help='Distance of camera from face')
 @click.option('--light-source', default='lights.yaml', show_default=True, help='Light source')
+@click.option('--binocular', is_flag=True, help='Whether to generate two images (one left eye, one right eye)')
 def main(options_file, out_dir, n_id, n_var, add_background, image_resolution, image_format, save_image_separately, genders, ethns, ages,
          shape_params, tex_params, au_amp_params, au_number_params, x_rot, y_rot, z_rot, x_trans, y_trans, z_trans, x_rot_lights,
          y_rot_lights, z_rot_lights, save_id_params, save_background, save_buffers, save_lighting, renderscale,
-         camera_distance, light_source):
+         camera_distance, light_source, binocular):
 
     ### Preliminary settings
     out_dir = Path(out_dir).absolute()
@@ -110,6 +115,7 @@ def main(options_file, out_dir, n_id, n_var, add_background, image_resolution, i
         far = 1000.
     )
     ctx.assign_camera(0)
+
     base_nf.detach()  # not necessary anymore
     ctx.set_lights(Path(light_source))  # probably put somewhere else
 
@@ -185,9 +191,12 @@ def main(options_file, out_dir, n_id, n_var, add_background, image_resolution, i
             # Save all (other) features as a hdf5 file
             with h5py.File(f_out + '_features.h5', 'w') as f_out:
                 
-                if save_id_params:  # save shape and texture parameters
-                    f_out.create_dataset('shape', data=shape_coeff, compression='gzip', compression_opts=9)
-                    f_out.create_dataset('tex', data=tex_coeff, compression='gzip', compression_opts=9)            
+                # save shape and texture parameters
+                if save_id_params:  
+                    # Note that we're saving the "scaled" coefficients, i.e., the
+                    # coefficients x variance of the coeffients in PCA space
+                    f_out.create_dataset('shape', data=shape_coeff * SV, compression='gzip', compression_opts=9)
+                    f_out.create_dataset('tex', data=tex_coeff * ST, compression='gzip', compression_opts=9)            
 
                 if not save_image_separately:  # save img, too, if not already
                     f_out.create_dataset('img', data=np.array(img), compression='gzip', compression_opts=9)
@@ -241,7 +250,7 @@ def main(options_file, out_dir, n_id, n_var, add_background, image_resolution, i
                 # Always save other generative parameters (rot, trans, lights, gender, ethn, age, id)
                 for (name, p) in [
                     ('xr', xr), ('yr', yr), ('zr', zr), ('xt', xt), ('yt', yt), ('zt', zt),
-                    ('lx', xl), ('ly', yl), ('zl', zl), ('gender', gend), ('ethn', ethn), ('age', age),
+                    ('xl', xl), ('yl', yl), ('zl', zl), ('gender', gend), ('ethn', ethn), ('age', age),
                     ('id', id_name)
                     ]:
                     f_out.attrs[name] = p
