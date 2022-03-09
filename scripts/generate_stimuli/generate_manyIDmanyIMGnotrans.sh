@@ -15,4 +15,3 @@ python scripts/generate_stimuli/generate_faces.py \
     --camera-distance 300 \
     --add-background \
     --save-background
-

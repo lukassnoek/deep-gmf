@@ -183,7 +183,7 @@ def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
 
     # Train and save both model and history (loss/accuracy across epochs)
     history = model.fit(train, validation_data=val, epochs=epochs,
-                        steps_per_epoch=steps_per_epoch, callbacks=callbacks)
+                        callbacks=callbacks)
     epochs = len(history.history['loss'])  # check actual number of epochs!
     model.save(f"{model_dir}/epoch-{epochs:03d}")
     pd.DataFrame(history.history).to_csv(f'{model_dir}/history.csv', index=False)

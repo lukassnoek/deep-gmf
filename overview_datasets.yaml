@@ -2,5 +2,12 @@ fewIDmanyIMG:
   n_id: 128
   n_var_per_id: 1024
   translation: False
-  background: False
+  background: True
+  camera_distance: 300
+
+manyIDmanyIMG:
+  n_id: 8192
+  n_var_per_id: 32
+  translation: False
+  background: True
   camera_distance: 300

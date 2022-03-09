@@ -14,21 +14,20 @@ CAT_COLS = ['id', 'ethn', 'gender']
 CONT_COLS = ['age', 'xr', 'yr', 'zr', 'xt', 'yt', 'zt', 'xl', 'yl', 'zl']
 
 
-def create_test_dataset(df_test, X_col='image_path', batch_size=256, target_size=(224, 224, 3), get_background=True):
+def create_test_dataset(df_test, X_col='image_path', batch_size=256, target_size=(224, 224, 3)):
+    
+    # Note to self: no reason to shuffle dataset for testing!
     files = df_test[X_col].to_numpy()
     files_dataset = tf.data.Dataset.from_tensor_slices(files)
     dataset = files_dataset.map(lambda f: _preprocess_img(f, target_size),
-                                  num_parallel_calls=tf.data.AUTOTUNE)
+                                num_parallel_calls=tf.data.AUTOTUNE)
     
     shape_tex_bg = []
-    cols = ['shape', 'tex']
-    if get_background:
-        cols.append('backgrounds')
-
-    for col in ('shape', 'tex'):
+    for feat in ('shape', 'tex', 'background'):
+        # by default, we want all shape/tex coefficients
         ds = files_dataset.map(
             lambda f: tf.py_function(
-                func=_load_hdf_features, inp=[f, col, 0], Tout=tf.float32,
+                func=_load_hdf_features, inp=[f, feat, 0], Tout=tf.float32,
             ),
             num_parallel_calls=tf.data.AUTOTUNE
         )
@@ -49,6 +48,7 @@ def create_dataset(df, X_col='image_path', Y_col='id', Z_col=None, batch_size=25
                    n_id_train=None, n_id_val=None, n_var_per_id=None, n_coeff=None,
                    query=None, target_size=(224, 224, 3), shuffle=True, cache=False):
 
+    # Never train a model on test-set stimuli
     df = df.query("split != 'testing'")
 
     # Make sure Y_col and Z_col are lists by default
@@ -158,9 +158,9 @@ def create_dataset(df, X_col='image_path', Y_col='id', Z_col=None, batch_size=25
 
     # Shuffle rows of dataframe; much faster than
     # shuffling the Dataset object!
-    if shuffle:
-        df_train = df_train.sample(frac=1)
-        df_val = df_val.sample(frac=1)
+    #if shuffle:
+    #    df_train = df_train.sample(frac=1)
+    #    df_val = df_val.sample(frac=1)
         
     train_val_datasets = []
     for ds_name, df_ in [('training', df_train), ('validation', df_val)]:
@@ -170,6 +170,13 @@ def create_dataset(df, X_col='image_path', Y_col='id', Z_col=None, batch_size=25
         # Note to self: Dataset.list_files automatically sorts the input,
         # undoing the df.sample randomization! So use from_tensor_slices instead
         files_dataset = tf.data.Dataset.from_tensor_slices(files)
+
+        # Note to self: I think Keras does not automatically shuffle the data when passing it
+        # a tensorflow Dataset object, so we need to explicitly shuffle it here
+        # Also, we do it here (instead of at the end), because the files are ony a pointer, so
+        # it's much faster
+        if shuffle and ds_name == 'training':
+            files_dataset = files_dataset.shuffle(buffer_size=len(files), reshuffle_each_iteration=True)
 
         # Load img + resize + normalize (/255)
         # Do not overwrite files_dataset, because we need it later
