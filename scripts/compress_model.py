@@ -18,13 +18,12 @@ from src.losses import AngleLoss
 @click.option('--n-comp', default=500)
 @click.option('--n-batches', default=2)
 @click.option('--batch-size', default=512)
-@click.option('--query', default=None)
-def main(model_path, dataset, n_comp, n_batches, batch_size):
+def main(model_path, n_comp, n_batches, batch_size):
     """ Learn a (linear PCA) compression of the feature representations
     in each layer of a given model (or, at least, the input/conv/globalpool layers.)
     """
     # Load dataset info to pass to `create_dataset`
-    model_name = str(Path(model_path).name)
+    model_name = str(Path(model_path).parent.name)
     dataset = model_name.split('dataset-')[1].split('_')[0]
     info = pd.read_csv(f'/analyse/Project0257/lukas/data/{dataset}.csv')
     train_data, _ = create_dataset(info, Y_col='shape', batch_size=batch_size)

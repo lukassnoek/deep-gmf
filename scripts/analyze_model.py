@@ -47,8 +47,10 @@ F_NAMES = {
 @click.option('--cpu', is_flag=True)
 def main(model_path, compress, n_samples, n_id_test, cpu):
 
-    # Infer dataset the model was trained on from `model_path`
-    model_name = str(Path(model_path).parent.name)
+    model_path = Path(model_path)
+    # Infer dataset the model was trained on from `model_path``
+    model_name = str(model_path.parent.name)
+    epoch_id = str(model_path.name)
     dataset = model_name.split('dataset-')[1].split('_')[0]
     info = pd.read_csv(f'/analyse/Project0257/lukas/data/{dataset}.csv')
     df_test = info.query("split == 'testing'")  # only use test-set stimuli!
@@ -81,7 +83,7 @@ def main(model_path, compress, n_samples, n_id_test, cpu):
 
         results = defaultdict(list)
         if compress:
-            comp_params = h5py.File(f'{model_path}_compressed.h5', 'r')
+            comp_params = h5py.File(f'{str(model_path)}_compressed.h5', 'r')
 
         for op_nr, layer in enumerate(tqdm(layers)):
 
@@ -177,7 +179,7 @@ def main(model_path, compress, n_samples, n_id_test, cpu):
 
         df = pd.DataFrame(results)
         
-        f_out = f"results/{model_name}.tsv"
+        f_out = f"results/{model_name}_{epoch_id}.tsv"
         df.to_csv(f_out, sep='\t', index=False)
  
         if compress:

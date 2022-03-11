@@ -46,11 +46,11 @@ TARGET_INFO = {
 @click.option('--epochs', default=100)
 @click.option('--target-val-loss', type=click.FLOAT, default=None)
 @click.option('--lr', default=1e-4)
-@click.option('--n-gpu', default=1)
+@click.option('--gpu-id', default=0)
 @click.option('--save-every-x-epochs', default=10)
 def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
          n_var_per_id, n_coeff, query, image_size, epochs,
-         target_val_loss, lr, n_gpu, save_every_x_epochs):
+         target_val_loss, lr, gpu_id, save_every_x_epochs):
     """ Main training function.
     
     Parameters
@@ -80,9 +80,6 @@ def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
     query : str
         Query string to filter the feature dataframe; for example, "age < 50" or
         "(xr > -30) & (xr < 30)"
-    read_n_rows : int
-        Read in the first `read_n_rows` rows of the feature dataframe
-        (for quick testing when the dataframe is large)
     image_size : int
         What the image size should be (assumes a square image)
     epochs : int
@@ -131,7 +128,7 @@ def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
             weights[t] = TARGET_INFO[t]['weight']
 
     # Manage multi GPU training
-    devices = [f"/gpu:{g}" for g in range(n_gpu)]
+    devices = [f"/gpu:{gpu_id}"]
     strategy = tf.distribute.MirroredStrategy(devices=devices)
     atexit.register(strategy._extended._collective_ops._pool.close)
 

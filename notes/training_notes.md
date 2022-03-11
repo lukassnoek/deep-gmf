@@ -24,3 +24,6 @@ Messing around with training models that predict shape (even just a single shape
 * You definitely need more than 1 variation per identity!
 * The model will, at some point, overfit to the training set, i.e., validation loss will halt and then increase at some point, but training loss will keep decreasing
 * Overfitting can, to some degree, be countered by training on more identities. E.g., when training on 1024 identities, validation cosine similarity will plateau at 0.5, training on 2048 identities will plateau at 0.6, etc. 
+
+### 11 Mar 2022
+Experimenting with how many variations per ID you need to train a simple ResNet10 to classify ID. Weirdly, fewer variations is possible when setting the learning rate a lot higher. So far, it works for 32 variations per ID with a learning rate of 0.005 (not higher!).

@@ -44,7 +44,7 @@ def create_test_dataset(df_test, X_col='image_path', batch_size=256, target_size
     return dataset
 
 
-def create_dataset(df, X_col='image_path', Y_col='id', Z_col=None, batch_size=256,
+def create_dataset(df, Y_col='id', Z_col=None, batch_size=256,
                    n_id_train=None, n_id_val=None, n_var_per_id=None, n_coeff=None,
                    query=None, target_size=(224, 224, 3), shuffle=True, cache=False):
 
@@ -63,7 +63,11 @@ def create_dataset(df, X_col='image_path', Y_col='id', Z_col=None, batch_size=25
         # face IDs should be the same in the train and val set
         if n_id_train is not None:
             n_id_val = n_id_train
-        
+        else:
+            n_id = df['id'].nunique()
+            if n_id > 512:
+                print(f"WARNING: there are a lot of IDs {n_id}; going to be very slow!")
+
         if n_id_val is not None:
             n_id_train = n_id_val
 
@@ -156,32 +160,22 @@ def create_dataset(df, X_col='image_path', Y_col='id', Z_col=None, batch_size=25
                 slu.adapt(df_comb[col].to_numpy())
                 cat_encoders[col] = slu
 
-    # Shuffle rows of dataframe; much faster than
-    # shuffling the Dataset object!
-    #if shuffle:
-    #    df_train = df_train.sample(frac=1)
-    #    df_val = df_val.sample(frac=1)
-        
+    if shuffle:
+        # Make sure first epoch is also shuffled?
+        df_train = df_train.sample(frac=1)
+
     train_val_datasets = []
     for ds_name, df_ in [('training', df_train), ('validation', df_val)]:
-        # `files` is a list with paths to images
-        files = df_[X_col].tolist()
-        
         # Note to self: Dataset.list_files automatically sorts the input,
         # undoing the df.sample randomization! So use from_tensor_slices instead
-        files_dataset = tf.data.Dataset.from_tensor_slices(files)
-
-        # Note to self: I think Keras does not automatically shuffle the data when passing it
-        # a tensorflow Dataset object, so we need to explicitly shuffle it here
-        # Also, we do it here (instead of at the end), because the files are ony a pointer, so
-        # it's much faster
-        if shuffle and ds_name == 'training':
-            files_dataset = files_dataset.shuffle(buffer_size=len(files), reshuffle_each_iteration=True)
-
+        df_dataset = tf.data.Dataset.from_tensor_slices(dict(df_))
+        #if shuffle and ds_name == 'training':
+        #    df_dataset = df_dataset.shuffle(buffer_size=1024, )
+    
         # Load img + resize + normalize (/255)
         # Do not overwrite files_dataset, because we need it later
-        X_dataset = files_dataset.map(lambda f: _preprocess_img(f, target_size),
-                                      num_parallel_calls=tf.data.AUTOTUNE)
+        X_dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size),
+                                   num_parallel_calls=tf.data.AUTOTUNE)
 
         # Extract and preprocess other input (Z) and output (Y) vars
         ds_tmp = {'Y': (), 'Z': ()}
@@ -198,27 +192,21 @@ def create_dataset(df, X_col='image_path', Y_col='id', Z_col=None, batch_size=25
                 if col in ['shape', 'tex', 'background']:
                     # Tensorflow cannot handle `None` values, so set to 0
                     n_coeff = 0 if n_coeff is None else n_coeff
-                    ds = files_dataset.map(
-                        lambda f: tf.py_function(
-                            func=_load_hdf_features, inp=[f, col, n_coeff], Tout=tf.float32,
+                    ds = df_dataset.map(
+                        lambda row: tf.py_function(
+                            func=_load_hdf_features, inp=[row['image_path'], col, n_coeff], Tout=tf.float32,
                         ),
                         num_parallel_calls=tf.data.AUTOTUNE
                     )
                     ds_tmp[name] += (ds,)  # add to temporary dataset tuple
                     continue  # skip rest of block
                 
-                # Below is necessary because sometimes pandas
-                # treats numeric colums as object/str ...
-                if col in CAT_COLS:
-                    df_ = df_.astype({col: str})
-                else:
-                    df_ = df_.astype({col: float})
-
                 # Use df column as tensor slices, to be preprocessed
                 # in a way depending on whether it's a categorical or
                 # continuous variable
-                v = df_[col].to_numpy()  
-                ds = tf.data.Dataset.from_tensor_slices(v)
+                ds = df_dataset.map(lambda row: row[col],
+                    num_parallel_calls=tf.data.AUTOTUNE
+                )
 
                 if col in CAT_COLS:
                     # Use previously created StringLookup layers
@@ -266,14 +254,14 @@ def create_dataset(df, X_col='image_path', Y_col='id', Z_col=None, batch_size=25
 
         train_val_datasets.append(dataset)
 
-    # Return as tuple instead of list   
-    return train_val_datasets[0], train_val_datasets[1]
+    ds_train, ds_val = train_val_datasets
+    return ds_train, ds_val
 
 
-def _preprocess_img(file, target_size):
+def _preprocess_img(row, target_size):
     """ Image-to-tensor (plus some preprocessing).
     To be used in dataset.map(). """
-    img = tf.io.read_file(file)
+    img = tf.io.read_file(row['image_path'])
     img = tf.io.decode_png(img, channels=3)
     img = tf.image.resize(img, [*target_size[:2]])
     img = img / 255.  # rescale
@@ -284,7 +272,7 @@ def _load_hdf_features(f, feature, n_coeff):
     f = f.numpy().decode('utf-8')
     feature = feature.numpy().decode('utf-8')
     with h5py.File(f.replace('image.png', 'features.h5'), 'r') as f_in:
-        data = f_in[feature][:].astype(np.float32)
+        data = f_in[feature][:]
 
     if feature == 'tex' and n_coeff != 0:
         data = data[:, :n_coeff]
