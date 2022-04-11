@@ -1,5 +1,6 @@
+import tensorflow as tf
 from tensorflow.keras import Model
-from tensorflow.keras.layers import Dense
+from tensorflow.keras.layers import Dense, Lambda, Flatten
 from tensorflow.keras.callbacks import Callback
 
 
@@ -22,9 +23,21 @@ CLASS_OR_REG = {
 }
 
 
-def add_head(body, targets, n_out):
+def add_embedding_head(body, n_embedding=512):
+    """ Adds an embedding head with `n_embedding` units
+    to an existing model (`body`) to be used for training
+    a network with triplet loss. """
+    s = body.output  # intermediate output from body
+    x = Flatten(name='flatten')(s)
+    x = Dense(n_embedding, activation=None, name='embedding')(x)
+    y = Lambda(lambda x_: tf.math.l2_normalize(x_, axis=1), name='embedding_l2')(x)
+    model = Model(inputs=body.input, outputs=y, name=body.name)
+    return model
+
+
+def add_prediction_head(body, targets, n_out):
     """ Adds one or more classification/regression heads to 
-    an existing model ('body'). 
+    an existing model (`body`). 
     
     Parameters
     ----------

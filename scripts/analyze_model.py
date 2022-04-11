@@ -1,25 +1,26 @@
+import os
+os.environ['OPENBLAS_NUM_THREADS'] = '20'
+os.environ['MKL_NUM_THREADS'] = '20'
+os.environ['NUMEXPR_MAX_THREADS'] = '20'
+
 import sys
 import random
 import click
 import h5py
 import numpy as np
 import pandas as pd
-from sklearn.metrics import balanced_accuracy_score
 import tensorflow as tf
+
 from tqdm import tqdm
 from pathlib import Path
 from collections import defaultdict
-from sklearn.linear_model import Ridge, LogisticRegression
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import make_pipeline
 from tensorflow.keras import Model
 from tensorflow.keras.models import load_model
-from sklearn.model_selection import GroupKFold, StratifiedKFold, cross_val_score
-from sklearn.metrics import r2_score, balanced_accuracy_score
 
 sys.path.append('.')
 from src.io import create_test_dataset
 from src.losses import AngleLoss
+from src.decoding import decode_fracridge, decode_regular
 
 
 F_NAMES = {
@@ -42,10 +43,12 @@ F_NAMES = {
 @click.command()
 @click.argument('model_path', type=click.Path(exists=True, file_okay=False))
 @click.option('--compress', is_flag=True)
-@click.option('--n-samples', default=512)
+@click.option('--batch-size', default=512)
+@click.option('--n-samples', default=1024)
 @click.option('--n-id-test', type=click.INT, default=None)
-@click.option('--cpu', is_flag=True)
-def main(model_path, compress, n_samples, n_id_test, cpu):
+@click.option('--use-fracridge', is_flag=True)
+@click.option('--gpu-id', default=1)
+def main(model_path, compress, batch_size, n_samples, n_id_test, use_fracridge, gpu_id):
 
     model_path = Path(model_path)
     # Infer dataset the model was trained on from `model_path``
@@ -63,28 +66,47 @@ def main(model_path, compress, n_samples, n_id_test, cpu):
     else:
         n_id_test = df_test['id'].nunique()
 
+    if n_id_test > n_samples:
+        raise ValueError(f"Cannot have more face IDs ({n_id_test}) than samples ({n_samples})!")
+
+    if use_fracridge:
+        f_decode = decode_fracridge
+    else:
+        f_decode = decode_regular
+
     # Get an equal number of samples per `n_id_test`
     df_test = df_test.groupby('id').sample(n_samples // n_id_test)
-    df_test = df_test.sort_values(by=['id', 'ethn', 'gender', 'age'], axis=0)
+    df_test = df_test.sample(frac=1)
 
-    ctx = '/cpu:0' if cpu else '/gpu:0'
-    with tf.device(ctx):
+    #df_test = df_test.sort_values(by=['id', 'ethn', 'gender', 'age'], axis=0)
+    with tf.device(f'/gpu:{gpu_id}'):
 
         # Get a single batch of stimuli
-        dataset_tf = create_test_dataset(df_test, batch_size=n_samples)
-        X, shape, tex, bg = dataset_tf.__iter__().get_next()
+        dataset_tf = create_test_dataset(df_test, batch_size=batch_size)
 
         # Load model and filter layers
         model = load_model(model_path, custom_objects={'AngleLoss': AngleLoss})
-        layers2analyze = ['input', 'conv', 'globalpool']    
+        layers2analyze = ['input', 'conv', 'flatten', 'globalpool']    
         layers = [l for l in model.layers if 'shortcut' not in l.name]
         layers = [l for l in layers if any([l2a in l.name for l2a in layers2analyze])]
-        factors = ['id', 'xr', 'yr', 'zr', 'xl', 'yl']
+        factors = ['id', 'ethn', 'xr', 'yr', 'zr', 'xt', 'yt', 'zt', 'xl', 'yl']
 
         results = defaultdict(list)
         if compress:
             comp_params = h5py.File(f'{str(model_path)}_compressed.h5', 'r')
 
+        groups = df_test.loc[:, 'id'].to_numpy()        
+        shape, tex, bg = [], [], []
+        for _, shape_, tex_, bg_ in dataset_tf:
+            shape.append(shape_.numpy())
+            tex.append(tex_.numpy())
+            bg_ = tf.image.resize(tf.reshape(bg_, (batch_size, 256, 256, 3)), size=(112, 112))
+            bg.append(tf.reshape(bg_, (batch_size, -1)).numpy())
+
+        shape = np.vstack(shape)
+        tex = np.vstack(tex)
+        bg = np.vstack(bg)
+        
         for op_nr, layer in enumerate(tqdm(layers)):
 
             if 'layer' in layer.name:
@@ -99,79 +121,69 @@ def main(model_path, compress, n_samples, n_id_test, cpu):
             # Note to self: predict_step avoids warning that you get
             # when calling predict (but does the same)
             extractor = Model(inputs=model.inputs, outputs=[layer.output])
-            a_N = extractor.predict_step(X)
+            a_N = []
+            for X_, _, _, _ in dataset_tf:
+                a_N.append(extractor.predict_step(X_).numpy())
             
+            a_N = np.vstack(a_N)
+
             # Reshape to obs x features array (and cast to numpy)
-            a_N = tf.reshape(a_N, (tf.shape(a_N)[0], -1)).numpy()
+            a_N = tf.reshape(a_N, (a_N.shape[0], -1)).numpy()
 
             if compress:
                 # apply PCA transformation
                 mu = comp_params[layer.name]['mu'][:]
                 W = comp_params[layer.name]['W'][:]
-                a_N = (a_N - mu) @ W.T  # n_samples x 500
+                a_N = (a_N - mu) @ W  # n_samples x 500
+
+            # Remove zero ("dead") units
+            nonzero = a_N.sum(axis=0) != 0
+            a_N = a_N[:, nonzero]
             
-            # Important for Ridge
-            a_N = (a_N - a_N.mean(axis=0)) / a_N.std(axis=0)
-            
-            for v in factors + [('shape', shape), ('tex', tex)]:#, ('background', bg)]:
-                
+            for v in factors + [('shape', shape), ('tex', tex), ('background', bg)]:
                 if v in factors:
                     # regular parameter
-                    a_F = df_test.loc[:, v]
-                    if v in ['id', 'gender', 'ethn']:
-                        # if categorical, one-hot encode variable
-                        a_F = pd.get_dummies(a_F)
-                        cv = StratifiedKFold(n_splits=4)
-                    else:
-                        cv = GroupKFold(n_splits=4)
-
-                    a_F = a_F.to_numpy()                    
+                    a_F = df_test.loc[:, v].to_numpy()
                 else:
                     # It's already a n_samples x features array
                     v, a_F = v
-                    a_F = a_F.numpy()
-                    cv = GroupKFold(n_splits=4)
-                
-                nonzero = a_F.sum(axis=0) != 0
-                a_F = a_F[..., nonzero].squeeze()
+
+                    nonzero = a_F.sum(axis=0) != 0
+                    a_F = a_F[..., nonzero].squeeze()
+
+                    if a_F.ndim == 2:
+                        if a_F.shape[1] == 0:
+                            print(f"WARNING: feature {v} is constant!")
+                            continue
+
                 if v in ['id', 'gender', 'ethn']:
-                    mod = LogisticRegression()
-                    a_F = a_F.argmax(axis=1)
+                    groups_ = None if v == 'id' else groups
+                    score = decode_regular(a_N, a_F, groups=groups_, classification=True)
                 else:
-                    mod = Ridge(fit_intercept=False)
-                    a_F = (a_F - a_F.mean(axis=0)) / a_F.std(axis=0)
-                    
-                # Important to scale when using Ridge
-                pipe = mod#make_pipeline(StandardScaler(), mod)
-                if v in ['id', 'gender', 'ethn'] or a_F.ndim == 1:
-                    r = np.zeros(5)
+                    score = f_decode(a_N, a_F, groups=groups)
+
+                # Average across folds
+                score_av = np.median(score.squeeze(), axis=0)
+
+                if v == 'background':
+                    # Do not save r2 values of *all* background pixels
+                    score_av = score_av.mean()
+                    print(f"Layer {layer.name}, {v}: {score_av:.2f}")
+                    score_av = [score_av]
+                elif score_av.ndim == 0:
+                    print(f"Layer {layer.name}, {v}: {score_av:.2f}")
+                    score_av = [score_av]
                 else:
-                    r = np.zeros((5, a_F.shape[1]))
+                    score_av_ = score_av.mean()
+                    s_max = np.max(score_av)
+                    s_min = np.min(score_av)
+                    s_amax = np.argmax(score_av)
+                    print(f"Layer {layer.name}, {v}: {score_av_:.2f}, max: {s_max:.3f} ({s_amax}), min: {s_min:.3f}")
 
-                for i, (train_idx, test_idx) in enumerate(cv.split(a_N, a_F, groups=df_test.loc[:, 'id'].to_numpy())):
-                    pipe.fit(a_N[train_idx], a_F[train_idx])
-                    preds = pipe.predict(a_N[test_idx])
-                    if v in ['id', 'gender', 'ethn']:
-                        r[i] = balanced_accuracy_score(a_F[test_idx], preds)
-                    elif v in ['shape', 'tex', 'background']:
-                        r[i, :] = r2_score(a_F[test_idx], preds, multioutput='raw_values')
-                    else:
-                        r[i] = r2_score(a_F[test_idx], preds)
-
-                r_av = r.mean(axis=0)
-
-                if r.ndim == 1:
-                    print(layer.name, v, np.round(r_av, 3))
-                    r_av = [r_av]
-                elif v == 'background':
-                    r_av = [r_av.mean()]
-                else:
-                    print(layer.name, v, np.round(np.mean(r_av), 3), np.argmax(r_av))
-
-                for i, r_ in enumerate(r_av):
-                    results['corr'].append(r_)
+                for i, sc_ in enumerate(score_av):
+                    results['corr'].append(sc_)
                     results['factor'].append(v)
-                    results['feature_nr'].append(i)
+                    results['feature_nr'].append(i+1)
                     results['layername'].append(layer.name)
                     results['layer'].append(layer_nr)
                     results['operation'].append(op_type)

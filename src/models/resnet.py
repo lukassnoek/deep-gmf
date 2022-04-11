@@ -1,7 +1,7 @@
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Input, Conv2D, Activation
 from tensorflow.keras.layers import BatchNormalization, MaxPooling2D, Add
-from tensorflow.keras.layers import GlobalAveragePooling2D
+from tensorflow.keras.layers import GlobalAveragePooling2D, Flatten, Dense
 
 
 def ResBlockStack(filters, n_layers=2, kernel_size=3, stride=2, bn_momentum=0.01, block=1):
@@ -138,7 +138,7 @@ def ResNet6(input_shape=(224, 224, 3), bn_momentum=0.01):
     return model
 
 
-def ResNet10(input_shape=(224, 224, 3), bn_momentum=0.01):
+def ResNet10(input_shape=(224, 224, 3), bn_momentum=0.9):
     """ ResNet10 model.
     
     Parameters
@@ -177,8 +177,12 @@ def ResNet10(input_shape=(224, 224, 3), bn_momentum=0.01):
     x = BatchNormalization(momentum=bn_momentum, name='layer9_bnorm')(x)
     x = Activation('relu', name='layer9_relu')(x)
 
-    # Average feature maps per filter (resulting in 512 values)
-    x = GlobalAveragePooling2D(name='layer9_globalpool')(x)
+    #x = GlobalAveragePooling2D(name='layer9_globalpool')(x)
+    # Note to self: use regular max pooling instead of
+    # global max pooling, because the latter results in
+    # too few features (512) for shape decoding
+    x = MaxPooling2D(strides=2, padding='valid', name='layer9_maxpool')(x)
+    x = Flatten(name='layer9_flatten')(x)
     
     # Create model
     model = Model(inputs=s, outputs=x, name='ResNet10')
@@ -290,16 +294,16 @@ if __name__ == '__main__':
     model.compile(optimizer='adam', loss='categorical_crossentropy', metrics='accuracy')
     print(model.summary())
     
-    from tensorflow.keras.utils import plot_model
-    plot_model(
-        model,
-        to_file="model.png",
-        show_shapes=False,
-        show_dtype=False,
-        show_layer_names=True,
-        rankdir="TB",
-        expand_nested=False,
-        dpi=96,
-        layer_range=None,
-        show_layer_activations=False,
-    )
+    # from tensorflow.keras.utils import plot_model
+    # plot_model(
+    #     model,
+    #     to_file="model.png",
+    #     show_shapes=False,
+    #     show_dtype=False,
+    #     show_layer_names=True,
+    #     rankdir="TB",
+    #     expand_nested=False,
+    #     dpi=96,
+    #     layer_range=None,
+    #     show_layer_activations=False,
+    # )

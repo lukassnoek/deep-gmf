@@ -14,20 +14,25 @@ CAT_COLS = ['id', 'ethn', 'gender']
 CONT_COLS = ['age', 'xr', 'yr', 'zr', 'xt', 'yt', 'zt', 'xl', 'yl', 'zl']
 
 
-def create_test_dataset(df_test, X_col='image_path', batch_size=256, target_size=(224, 224, 3)):
+def create_test_dataset(df_test, batch_size=256, target_size=(224, 224, 3),
+                        n_shape=None, n_tex=None):
     
     # Note to self: no reason to shuffle dataset for testing!
-    files = df_test[X_col].to_numpy()
-    files_dataset = tf.data.Dataset.from_tensor_slices(files)
-    dataset = files_dataset.map(lambda f: _preprocess_img(f, target_size),
-                                num_parallel_calls=tf.data.AUTOTUNE)
+    df_dataset = tf.data.Dataset.from_tensor_slices(dict(df_test))
+    dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size),
+                             num_parallel_calls=tf.data.AUTOTUNE)
+    
+    n_shape = 0 if n_shape is None else n_shape
+    n_tex = 0 if n_tex is None else n_tex
     
     shape_tex_bg = []
     for feat in ('shape', 'tex', 'background'):
         # by default, we want all shape/tex coefficients
-        ds = files_dataset.map(
-            lambda f: tf.py_function(
-                func=_load_hdf_features, inp=[f, feat, 0], Tout=tf.float32,
+        ds = df_dataset.map(
+            lambda row: tf.py_function(
+                func=_load_hdf_features, inp=[
+                    row['image_path'], feat, n_shape, n_tex],
+                Tout=tf.float32,
             ),
             num_parallel_calls=tf.data.AUTOTUNE
         )
@@ -45,8 +50,9 @@ def create_test_dataset(df_test, X_col='image_path', batch_size=256, target_size
 
 
 def create_dataset(df, Y_col='id', Z_col=None, batch_size=256,
-                   n_id_train=None, n_id_val=None, n_var_per_id=None, n_coeff=None,
-                   query=None, target_size=(224, 224, 3), shuffle=True, cache=False):
+                   n_id_train=None, n_id_val=None, n_var_per_id=None, n_shape=None,
+                   n_tex=None, query=None, target_size=(224, 224, 3), shuffle=True,
+                   cache=False, use_triplet_loss=False):
 
     # Never train a model on test-set stimuli
     df = df.query("split != 'testing'")
@@ -60,24 +66,28 @@ def create_dataset(df, Y_col='id', Z_col=None, batch_size=256,
     
     if 'id' in Y_col:
         # If we're classifying face ID, the subsample of
-        # face IDs should be the same in the train and val set
-        if n_id_train is not None:
+        # face IDs should be the same in the train and val set,
+        # but only when not using triplet loss
+        if n_id_train is not None and not use_triplet_loss:
             n_id_val = n_id_train
         else:
             n_id = df['id'].nunique()
-            if n_id > 512:
+            if n_id > 512 and not use_triplet_loss:
+                # Probably not a good idea to train a network to classify
+                # a shit ton of IDs
                 print(f"WARNING: there are a lot of IDs {n_id}; going to be very slow!")
 
-        if n_id_val is not None:
+        if n_id_val is not None and not use_triplet_loss:
             n_id_train = n_id_val
 
     if query is not None:
+        # Filter dataset with query string
         df = df.query(query)
     
-    if 'id' in Y_col:
+    if 'id' in Y_col and not use_triplet_loss:
         # If 'id' is one of the targets, we cannot stratify according
         # to 'id', because that will lead to unique 'id' values in the val set!
-        if n_id_val is not None:  # `n_id_val`` always is the same as `n_id_train`
+        if n_id_train is not None:
             # Pick a subset of IDs
             ids = df['id'].unique().tolist()
             ids = random.sample(ids, n_id_val)
@@ -191,10 +201,11 @@ def create_dataset(df, Y_col='id', Z_col=None, batch_size=256,
                 # using a custom (non-tf) function
                 if col in ['shape', 'tex', 'background']:
                     # Tensorflow cannot handle `None` values, so set to 0
-                    n_coeff = 0 if n_coeff is None else n_coeff
+                    n_shape = 0 if n_shape is None else n_shape
+                    n_tex = 0 if n_tex is None else n_tex
                     ds = df_dataset.map(
                         lambda row: tf.py_function(
-                            func=_load_hdf_features, inp=[row['image_path'], col, n_coeff], Tout=tf.float32,
+                            func=_load_hdf_features, inp=[row['image_path'], col, n_shape, n_tex], Tout=tf.float32,
                         ),
                         num_parallel_calls=tf.data.AUTOTUNE
                     )
@@ -213,6 +224,9 @@ def create_dataset(df, Y_col='id', Z_col=None, batch_size=256,
                     # to one-hot encode string values
                     ds = ds.map(lambda x: cat_encoders[col](x),
                                 num_parallel_calls=tf.data.AUTOTUNE)
+                    
+                    if col == 'id' and use_triplet_loss:
+                        ds = ds.map(lambda x: tf.math.argmax(x))
 
                 elif col in CONT_COLS:
                     # Cast to float32 (necessary for e.g. rotation params)
@@ -268,17 +282,17 @@ def _preprocess_img(row, target_size):
     return img
 
 
-def _load_hdf_features(f, feature, n_coeff):
+def _load_hdf_features(f, feature, n_shape, n_tex):
     f = f.numpy().decode('utf-8')
     feature = feature.numpy().decode('utf-8')
     with h5py.File(f.replace('image.png', 'features.h5'), 'r') as f_in:
         data = f_in[feature][:]
 
-    if feature == 'tex' and n_coeff != 0:
-        data = data[:, :n_coeff]
+    if feature == 'tex' and n_tex != 0:
+        data = data[:, :n_tex]
     
-    if feature == 'shape' and n_coeff != 0:
-        data = data[:n_coeff]
+    if feature == 'shape' and n_shape != 0:
+        data = data[:n_shape]
 
     if feature in ('tex', 'background'):
         data = data.flatten()

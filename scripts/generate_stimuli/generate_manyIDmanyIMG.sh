@@ -1,5 +1,5 @@
 python scripts/generate_stimuli/generate_faces.py \
-    --out-dir /analyse/Project0257/lukas/data/gmf_manyIDmanyIMG \
+    --out-dir /analyse/Project0257/lukas/data/manyIDmanyIMG \
     --n-id 16384 \
     --n-var 64 \
     --genders M+F \

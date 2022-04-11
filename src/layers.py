@@ -2,6 +2,65 @@ import tensorflow as tf
 from tensorflow.keras.layers import Layer
 
 
+class PCATransform(Layer):
+    """ Linear transform of data into a lower-dimensional
+    space using an (already fitted) PCA decomposition.
+    
+    If using fixed weights (mu, W), *first* initialize the
+    entire model (a `tf.keras.Model` object) and call the
+    layer's `set_weights` method.
+    
+    Parameters
+    ----------
+    n_comp : int
+        Number of PCA components (needed for initialization of
+        weights array)
+    trainable : bool
+        Whether the linear transform parameters (W and mu) are
+        trainable; if not, the weights need to be set using
+        the `set_weights(mu, W)` method
+    name : str
+        Name of layer
+    **kwargs : dict
+        Other keyword parameters passed to the Keras Layer
+        init method
+        
+    Examples
+    --------
+    Assuming you have a numpy array for `mu` and `W`, you
+    can set them as follows:
+    
+    >>> pca = PCATransform(n_comp=500)
+    >>> y = pca(x)
+    >>> model = tf.keras.Model(input=x, output=y)
+    >>> model.get_layer('pca_transform').set_weights(mu, W)
+    """
+    def __init__(self, n_comp=500, trainable=False, name='pca_transform', **kwargs):
+        super().__init__(trainable=trainable, name=name, **kwargs)
+        self.n_comp = n_comp
+        
+    def build(self, input_shape):
+        self.mu = self.add_weight(shape=(input_shape[1],), trainable=False, name='mu')
+        self.W = self.add_weight(shape=(input_shape[1], self.n_comp), trainable=False, name='W')
+        
+    def call(self, inputs):
+        return tf.matmul(tf.subtract(inputs, self.mu), self.W)
+        
+
+class Normalization(Layer):
+    """ Batch normalization, but the parameters are not learned. 
+    This is helpful in "decoding" blocks in which we don't care
+    about learning biases/intercepts of the linear models mapping
+    a layer to target variables (such as shape components).
+    """
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def call(self, inputs):
+        inputs_centered = tf.subtract(inputs, tf.reduce_mean(inputs, axis=0))
+        return tf.divide(inputs_centered, tf.math.reduce_std(inputs))
+
+
 @tf.custom_gradient
 def _grad_reverse(x):
     """ Pass through of input (`x`) and inverts gradient. 

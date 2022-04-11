@@ -1,22 +1,53 @@
+from sklearn.model_selection import ParameterSampler
 import tensorflow as tf
-from math import pi
 #from tensorflow.keras.metrics import Metric
 
 
-# def AngleDistance(y_true, y_pred, absolute=False, is_degree=True):
+def RSquared(reduce='median', center=True):
+    """ Computes R-squared with custom reduction (median) and
+    optional centering. Mimics a Keras class, but is actually just a 
+    function that returns a function in order to allow
+    extra parameters.
     
-#     def apply(y_true, y_pred):
-        
-    
-#     return apply
+    Parameters
+    ----------
+    reduce : str
+        How to reduce the scores for all targets; 'median' (default)
+        or mean (anything else)
+    center : bool
+        Whether to center the `y_true` and `y_pred` variables; note
+        that setting this to `True` does not yield to usual/strict
+        definition of R-squared!
+
+    Returns
+    -------
+    r_squared : callable
+        Function that computes R-squared
+    """
+
+    def r_squared(y_true, y_pred):
+        y_true_mean = tf.reduce_mean(y_true, axis=0)
+
+        if center:
+            y_true = y_true - y_true_mean
+            y_pred = y_pred - tf.reduce_mean(y_pred, axis=0)
+
+        num = tf.reduce_sum(tf.square(y_true - y_pred), axis=0)
+        denom = tf.reduce_sum(tf.square(y_true - y_true_mean), axis=0)
+        r_sq = 1 - (num / denom)
+
+        if reduce == 'median':
+            return _reduce_median(r_sq)
+        else:
+            return tf.reduce_mean(r_sq)
+                    
+    return r_squared
 
 
-# class AngleDistance(Metric):
-    
-#     def __init__(self, absolute=False, is_degrees=True):
-        
-#         super().__init__()
-#         self.absolute = absolute
-#         self.is_degrees = is_degrees
-        
-#     def result(self)
+def _reduce_median(v):
+    """ From Stackoverflow user BlueSun:
+    https://stackoverflow.com/questions/43824665/tensorflow-median-value
+    """
+    v = tf.reshape(v, [-1])
+    m = tf.shape(v)[0] // 2
+    return tf.reduce_min(tf.nn.top_k(v, m, sorted=False).values)

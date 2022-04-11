@@ -7,12 +7,13 @@ import tensorflow as tf
 from pathlib import Path
 from tensorflow.keras.callbacks import ModelCheckpoint
 from tensorflow.keras.optimizers import Adam
+from tensorflow_addons.losses import TripletSemiHardLoss
 
 sys.path.append('.')
 from src.models import MODELS
-from src.models.utils import EarlyStoppingOnLoss, add_head
 from src.losses import AngleLoss
 from src.io import create_dataset
+from src.models.utils import add_prediction_head, add_embedding_head
 
 
 TARGET_INFO = {
@@ -40,17 +41,18 @@ TARGET_INFO = {
 @click.option('--n-id-train', type=click.INT, default=None)
 @click.option('--n-id-val', type=click.INT, default=None)
 @click.option('--n-var-per-id', type=click.INT, default=None)
-@click.option('--n-coeff', type=click.INT, default=None)
+@click.option('--n-shape', type=click.INT, default=None)
+@click.option('--n-tex', type=click.INT, default=None)
 @click.option('--query', type=str, default=None)
 @click.option('--image-size', default=224)
-@click.option('--epochs', default=100)
-@click.option('--target-val-loss', type=click.FLOAT, default=None)
+@click.option('--epochs', default=10)
 @click.option('--lr', default=1e-4)
 @click.option('--gpu-id', default=0)
 @click.option('--save-every-x-epochs', default=10)
+@click.option('--use-triplet-loss', is_flag=True)
 def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
-         n_var_per_id, n_coeff, query, image_size, epochs,
-         target_val_loss, lr, gpu_id, save_every_x_epochs):
+         n_var_per_id, n_shape, n_tex, query, image_size, epochs,
+         lr, gpu_id, save_every_x_epochs, use_triplet_loss):
     """ Main training function.
     
     Parameters
@@ -85,16 +87,16 @@ def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
     epochs : int
         How many epochs to train the model for; this is ignored when
         `target_val_loss` is set
-    target_val_loss : float
-        Train until `target_val_loss` validation loss has been reached;
-        if set, the `epochs` parameter is ignored
     lr : float
         Learning rate for Adam optimizer
-    n_gpu : int
-        How many GPUs to train the model on
+    gpu_id : int
+        Which GPU to train the model on
     save_every_x_epochs : int
         After how many epochs the model should be saved
     """
+
+    if use_triplet_loss and 'id' not in target:
+        raise ValueError("Triplet loss can only be used with target 'id'!")
 
     # Load dataset info to pass to `create_dataset`
     info = pd.read_csv(f'/analyse/Project0257/lukas/data/{dataset}.csv')
@@ -116,10 +118,10 @@ def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
             weights[t] = 1.
         else:
             # Get n_out/loss/metrics from TARGET_INFO
-            if t == 'shape' and n_coeff is not None:
-                n_out += (n_coeff,)
-            elif t == 'tex' and n_coeff is not None:
-                n_out += (n_coeff * 5,)
+            if t == 'shape' and n_shape is not None:
+                n_out += (n_shape,)
+            elif t == 'tex' and n_tex is not None:
+                n_out += (n_tex * 5,)
             else:
                 n_out += (TARGET_INFO[t]['n_out'],)
 
@@ -127,60 +129,59 @@ def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
             metrics[t] = TARGET_INFO[t]['metric']
             weights[t] = TARGET_INFO[t]['weight']
 
-    # Manage multi GPU training
-    devices = [f"/gpu:{gpu_id}"]
-    strategy = tf.distribute.MirroredStrategy(devices=devices)
-    atexit.register(strategy._extended._collective_ops._pool.close)
+    if use_triplet_loss:
+        losses = TripletSemiHardLoss()
+        metrics = None
+        weights = None
 
     # Create training and validation set with a specific target variable(s)
     target_size = (image_size, image_size, 3)
     train, val = create_dataset(info, Y_col=target, target_size=target_size,
                                 batch_size=batch_size, n_id_train=n_id_train,
                                 n_id_val=n_id_val, n_var_per_id=n_var_per_id,
-                                n_coeff=n_coeff, query=query)
+                                n_shape=n_shape, n_tex=n_tex, query=query,
+                                use_triplet_loss=use_triplet_loss)
 
-    # For multiple GPU training!
-    with strategy.scope():  
-        # Create 'body' and add head to it, which may have
-        # multiple outputs (depends on `target`)
-        body = MODELS[model_name]()
-        model = add_head(body, target, n_out)
-
-        # Compile with pre-specified losses/metrics
-        opt = Adam(learning_rate=lr)
-        model.compile(optimizer=opt, loss=losses, metrics=metrics, loss_weights=weights)
- 
-    if target_val_loss is not None:
-        callbacks = [EarlyStoppingOnLoss(value=target_val_loss, monitor='val_loss')]
-        epochs = 200  # to be on the safe side
+    # Create 'body' and add head to it, which may have
+    # multiple outputs (depends on `target`)
+    body = MODELS[model_name]()
+    
+    if use_triplet_loss:
+        model = add_embedding_head(body, n_embedding=512)
     else:
-        callbacks = []
+        model = add_prediction_head(body, target, n_out)
 
+    # Compile with pre-specified losses/metrics
+    opt = Adam(learning_rate=lr)
+    model.compile(optimizer=opt, loss=losses, metrics=metrics, loss_weights=weights)
+  
     target = '+'.join(list(target))
-    model_dir = Path(f'trained_models/{model.name}_dataset-{dataset}_target-{target}')
-    #if model_dir.exists():
-    #    shutil.rmtree(str(model_dir))
-       
+    if use_triplet_loss:
+        target += 'triplet'
+    
+    model_dir = Path(f'trained_models/{model.name}_dataset-{dataset}_target-{target}')       
     model_dir.mkdir(parents=True, exist_ok=True)
 
     # Note that cardinality refers to number of steps per epoch when
     # the dataset is batched (like it is here)!
     steps_per_epoch = train.cardinality().numpy()  # for nice stdout
     
-    callbacks.append(ModelCheckpoint(
+    callbacks = [ModelCheckpoint(
         filepath=str(model_dir) + '/epoch-{epoch:03d}',
         save_best_only=False,
         save_weights_only=False,
         # Save every x epochs
         save_freq=int(steps_per_epoch * save_every_x_epochs),
-    ))
+    )]
 
     # Save untrained model as well!
     model.save(f"{model_dir}/epoch-{'0'.zfill(3)}")
 
     # Train and save both model and history (loss/accuracy across epochs)
-    history = model.fit(train, validation_data=val, epochs=epochs,
-                        callbacks=callbacks)
+    with tf.device(f'/gpu:{gpu_id}'):
+        history = model.fit(train, validation_data=val, epochs=epochs,
+                            callbacks=callbacks)
+
     epochs = len(history.history['loss'])  # check actual number of epochs!
     model.save(f"{model_dir}/epoch-{epochs:03d}")
     pd.DataFrame(history.history).to_csv(f'{model_dir}/history.csv', index=False)
