@@ -2,7 +2,6 @@ import os
 os.environ['DISPLAY'] = ':0.0'
 
 import click
-import logging
 import random
 import h5py
 import numpy as np
@@ -12,23 +11,12 @@ from pathlib import Path
 
 import GFG
 from GFG import Ctx
-from GFG.model import Nf, Adata
+from GFG.model import Nf
 from GFG.identity import IDModel
 from GFG.core import Camera
 from ogbGL.utils import imresize
 from generate_backgrounds import phase_scramble_image
 
-
-log_fmt = "%(asctime)s [%(levelname)-7.7s]  %(message)s"
-date_fmt = "%Y-%m-%d %H:%M:%S"
-logging.basicConfig(
-    level=logging.INFO,
-    format=log_fmt,
-    datefmt=date_fmt,
-    handlers=[
-        logging.StreamHandler()
-    ]
-)
 
 lightopts = {
     'diffuse': 2,
@@ -41,7 +29,6 @@ SV = np.load('data/idm_Sv.npy')
 
 
 @click.command('Main face generation API')
-@click.option('--options-file', help='Yaml file with options')
 @click.option('--out-dir', default='gmf_', show_default=True, help='Output directory')
 @click.option('--n-id', default=256, show_default=True, help='Number of face IDs to generate')
 @click.option('--n-var', default=1, show_default=True, help='Number of variations per face ID')
@@ -54,8 +41,6 @@ SV = np.load('data/idm_Sv.npy')
 @click.option('--ages', type=(int, int), default=(25, 25), show_default=True, help='Which age range (min, max) to sample from')
 @click.option('--shape-params', type=(float, float), default=(0., 1.), show_default=True, help='Parameters of normal dist (mu, std) to sample shape coefficients')
 @click.option('--tex-params', type=(float, float), default=(0., 1.), show_default=True, help='Parameters of normal dist (mu, std) to sample texture coefficients')
-@click.option('--au-amp-params', type=(float, float), default=(0., 0.), show_default=True, help='Parameters of unif dist (min, max) to sample AU amplitudes')
-@click.option('--au-number-params', type=(float, float), default=(0.5, 1.), show_default=True, help='Parameters of binom dist (n, p) to sample number of AUs')
 @click.option('--x-rot', type=(int, int), default=(0, 0), show_default=True, help='Range to vary rotation in X (deg.)')
 @click.option('--y-rot', type=(int, int), default=(0, 0), show_default=True, help='Range to vary rotation in Y (deg.)')
 @click.option('--z-rot', type=(int, int), default=(0, 0), show_default=True, help='Range to vary rotation in Z (deg.)')
@@ -71,32 +56,21 @@ SV = np.load('data/idm_Sv.npy')
 @click.option('--save-lighting', is_flag=True, help='Save intermediate lighting (in hdf5 file)')
 @click.option('--renderscale', default=4., show_default=True, help='Render scale of image')
 @click.option('--camera-distance', default=400, show_default=True, help='Distance of camera from face')
-@click.option('--light-source', default='lights.yaml', show_default=True, help='Light source')
-@click.option('--binocular', is_flag=True, help='Whether to generate two images (one left eye, one right eye)')
-def main(options_file, out_dir, n_id, n_var, add_background, image_resolution, image_format, save_image_separately, genders, ethns, ages,
-         shape_params, tex_params, au_amp_params, au_number_params, x_rot, y_rot, z_rot, x_trans, y_trans, z_trans, x_rot_lights,
+@click.option('--light-source', default='data/lights.yaml', show_default=True, help='Light source')
+def main(out_dir, n_id, n_var, add_background, image_resolution, image_format, save_image_separately, genders, ethns, ages,
+         shape_params, tex_params, x_rot, y_rot, z_rot, x_trans, y_trans, z_trans, x_rot_lights,
          y_rot_lights, z_rot_lights, save_id_params, save_background, save_buffers, save_lighting, renderscale,
-         camera_distance, light_source, binocular):
+         camera_distance, light_source):
 
     ### Preliminary settings
     out_dir = Path(out_dir).absolute()
     if not out_dir.exists():
         raise ValueError(f"Output directory {str(out_dir)} does not exist!")
 
-    logger = logging.getLogger('GMF')
-    fh = logging.FileHandler(out_dir / 'details.log')
-    fh.setFormatter(logging.Formatter(log_fmt, date_fmt))
-    logger.addHandler(fh)
-
-    logger.info("Loading data")
     IDM_PATH = '/analyse/Project0294/GFG_data/model_HDB_linear_v2dense_compact.mat'
     idm = IDModel.load(IDM_PATH)
     tdet = np.load('/analyse/Project0294/GFG_data/tdet.npy')
 
-    if sum(au_amp_params) > 0:
-        # Only load adata if we actually need to apply AUs
-        adata = Adata.load('quick_FACS_blendshapes_v2dense')
-    
     base_nf = Nf.from_default()
 
     ### Set up context
@@ -106,7 +80,7 @@ def main(options_file, out_dir, n_id, n_var, add_background, image_resolution, i
     # To init a camera, a model should exist, so using base_nf
     base_nf.attach(ctx)
     ctx._camera[0] = Camera(
-        ctx.win, image_resolution, renderscale,
+        ctx.win, image_resolution, (renderscale, renderscale),
         target=[-11.5644, -13.0381, 0],
         eye = [-11.5644, -13.0381, camera_distance],
         up = [0, 1, 0],

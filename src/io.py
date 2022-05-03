@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 from pathlib import Path
+from PIL import Image
 from tensorflow.keras.layers import StringLookup
 
 
@@ -12,6 +13,11 @@ DATA_PATH = Path('/analyse/Project0257/lukas/data')
 # CATegorical variables & CONTinuous variables
 CAT_COLS = ['id', 'ethn', 'gender']
 CONT_COLS = ['age', 'xr', 'yr', 'zr', 'xt', 'yt', 'zt', 'xl', 'yl', 'zl']
+
+
+def create_casia_webface_dataset():
+    pass
+        
 
 
 def create_test_dataset(df_test, batch_size=256, target_size=(224, 224, 3),
@@ -42,14 +48,14 @@ def create_test_dataset(df_test, batch_size=256, target_size=(224, 224, 3),
     dataset = dataset.batch(batch_size, drop_remainder=True)
     dataset = dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
     # Get rid of tf stdout vomit
-    options = tf.data.Options()
-    options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF
-    dataset = dataset.with_options(options)
+    #options = tf.data.Options()
+    #options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF
+    #dataset = dataset.with_options(options)
 
     return dataset
 
 
-def create_dataset(df, Y_col='id', Z_col=None, batch_size=256,
+def create_dataset(df, Y_col='id', batch_size=256,
                    n_id_train=None, n_id_val=None, n_var_per_id=None, n_shape=None,
                    n_tex=None, query=None, target_size=(224, 224, 3), shuffle=True,
                    cache=False, use_triplet_loss=False):
@@ -61,9 +67,6 @@ def create_dataset(df, Y_col='id', Z_col=None, batch_size=256,
     if isinstance(Y_col, (type(None), str)):
         Y_col = [Y_col]
 
-    if isinstance(Z_col, (type(None), str)):
-        Z_col = [Z_col]
-    
     if 'id' in Y_col:
         # If we're classifying face ID, the subsample of
         # face IDs should be the same in the train and val set,
@@ -151,14 +154,14 @@ def create_dataset(df, Y_col='id', Z_col=None, batch_size=256,
         val_batch_size = df_val.shape[0]
     else:
         val_batch_size = batch_size
-
+    
     # For categorical features (in Y or Z), we need to infer
     # the categories *on the full dataset* (here: `df_comb`),
     # otherwise we risk that the train and val set are encoded
     # differently (e.g., 'M' -> 0 in train, 'M' -> in val)
     df_comb = pd.concat((df_train, df_val), axis=0)
     cat_encoders = {}  # we'll store them for later
-    for col in list(Y_col) + list(Z_col):
+    for col in list(Y_col):
         if col is not None:
             if col in CAT_COLS:
                 # Note to self: encode entire dataset (`df`) because otherwise
@@ -167,9 +170,9 @@ def create_dataset(df, Y_col='id', Z_col=None, batch_size=256,
                 # StringLookup converts strings to integers and then
                 # (with output_mode='one_hot') to a dummy representation
                 slu = StringLookup(output_mode='one_hot', num_oov_indices=0)
-                slu.adapt(df_comb[col].to_numpy())
+                slu.adapt(df_comb[col].unique())
                 cat_encoders[col] = slu
-
+    
     if shuffle:
         # Make sure first epoch is also shuffled?
         df_train = df_train.sample(frac=1)
@@ -179,85 +182,65 @@ def create_dataset(df, Y_col='id', Z_col=None, batch_size=256,
         # Note to self: Dataset.list_files automatically sorts the input,
         # undoing the df.sample randomization! So use from_tensor_slices instead
         df_dataset = tf.data.Dataset.from_tensor_slices(dict(df_))
-        #if shuffle and ds_name == 'training':
-        #    df_dataset = df_dataset.shuffle(buffer_size=1024, )
+        if shuffle and ds_name == 'training':
+            df_dataset = df_dataset.shuffle(buffer_size=df_.shape[0], reshuffle_each_iteration=True)
     
         # Load img + resize + normalize (/255)
         # Do not overwrite files_dataset, because we need it later
         X_dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size),
                                    num_parallel_calls=tf.data.AUTOTUNE)
 
-        # Extract and preprocess other input (Z) and output (Y) vars
-        ds_tmp = {'Y': (), 'Z': ()}
-        for name, cols in {'Y': Y_col, 'Z': Z_col}.items():
-                        
-            for col in cols:
+        # Extract and preprocess output (Y) vars
+        ds_tmp = []
+        for col in Y_col:
 
-                if col is None:
-                    # More often than not, there are no `Z` cols
-                    continue
-
-                # shape/tex/3d are loaded from hdf5 file
-                # using a custom (non-tf) function
-                if col in ['shape', 'tex', 'background']:
-                    # Tensorflow cannot handle `None` values, so set to 0
-                    n_shape = 0 if n_shape is None else n_shape
-                    n_tex = 0 if n_tex is None else n_tex
-                    ds = df_dataset.map(
-                        lambda row: tf.py_function(
-                            func=_load_hdf_features, inp=[row['image_path'], col, n_shape, n_tex], Tout=tf.float32,
-                        ),
-                        num_parallel_calls=tf.data.AUTOTUNE
-                    )
-                    ds_tmp[name] += (ds,)  # add to temporary dataset tuple
-                    continue  # skip rest of block
-                
-                # Use df column as tensor slices, to be preprocessed
-                # in a way depending on whether it's a categorical or
-                # continuous variable
-                ds = df_dataset.map(lambda row: row[col],
+            # shape/tex/3d are loaded from hdf5 file
+            # using a custom (non-tf) function
+            if col in ['shape', 'tex', 'background']:
+                # Tensorflow cannot handle `None` values, so set to 0
+                n_shape = 0 if n_shape is None else n_shape
+                n_tex = 0 if n_tex is None else n_tex
+                ds = df_dataset.map(
+                    lambda row: tf.py_function(
+                        func=_load_hdf_features, inp=[row['image_path'], col, n_shape, n_tex], Tout=tf.float32,
+                    ),
                     num_parallel_calls=tf.data.AUTOTUNE
                 )
+                ds_tmp.append(ds)  # add to temporary dataset tuple
+                continue  # skip rest of block
+            
+            # Use df column as tensor slices, to be preprocessed
+            # in a way depending on whether it's a categorical or
+            # continuous variable
+            ds = df_dataset.map(lambda row: row[col],
+                num_parallel_calls=tf.data.AUTOTUNE
+            )
 
-                if col in CAT_COLS:
-                    # Use previously created StringLookup layers
-                    # to one-hot encode string values
-                    ds = ds.map(lambda x: cat_encoders[col](x),
-                                num_parallel_calls=tf.data.AUTOTUNE)
-                    
-                    if col == 'id' and use_triplet_loss:
-                        ds = ds.map(lambda x: tf.math.argmax(x))
+            if col in CAT_COLS:
+                # Use previously created StringLookup layers
+                # to one-hot encode string values
+                ds = ds.map(lambda x: cat_encoders[col](x),
+                            num_parallel_calls=tf.data.AUTOTUNE)
+                
+                if col == 'id' and use_triplet_loss:
+                    ds = ds.map(lambda x: tf.math.argmax(x))
 
-                elif col in CONT_COLS:
-                    # Cast to float32 (necessary for e.g. rotation params)
-                    ds = ds.map(lambda x: tf.cast(x, tf.float32))
-                else:
-                    raise ValueError("Not sure whether {col} is categorical or continuous!")
+            elif col in CONT_COLS:
+                # Cast to float32 (necessary for e.g. rotation params)
+                ds = ds.map(lambda x: tf.cast(x, tf.float32))
+            else:
+                raise ValueError("Not sure whether {col} is categorical or continuous!")
 
-                # Append to dict of Datasets
-                ds_tmp[name] += (ds,)
-        
-        if Z_col is not None:
-            # Merge Z into inputs (X, images); for now,
-            # do not nest Z (hence the *ds_tmp; might change later)
-            X_dataset = tf.data.Dataset.zip((X_dataset, *ds_tmp['Z']))
-
-        if len(ds_tmp['Y']) == 1:
+            # Append to dict of Datasets
+            ds_tmp.append(ds)
+    
+        if len(ds_tmp) == 1:
             # If only one output, it should not be nested!
-            ds_tmp['Y'] = ds_tmp['Y'][0]
+            ds_tmp = ds_tmp[0]
 
         # Merge inputs (X, Z) with outputs (Y)
-        dataset = tf.data.Dataset.zip((X_dataset, ds_tmp['Y']))
+        dataset = tf.data.Dataset.zip((X_dataset, ds_tmp))
     
-        # Optimization tricks (drop_remainder is necessary for multi-GPU
-        # training, don't know why)
-        if ds_name == 'training':
-            dataset = dataset.batch(batch_size, drop_remainder=True)
-        else:
-            dataset = dataset.batch(val_batch_size, drop_remainder=True)
-
-        dataset = dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
-
         # Get rid of tf stdout vomit
         options = tf.data.Options()
         options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF
@@ -266,6 +249,17 @@ def create_dataset(df, Y_col='id', Z_col=None, batch_size=256,
         if cache:
             dataset = dataset.cache()
 
+        #if ds_name == 'training':
+        #    dataset = dataset.shuffle(df_.shape[0], reshuffle_each_iteration=True)
+
+        # Optimization tricks (drop_remainder is necessary for multi-GPU
+        # training, don't know why)
+        if ds_name == 'training':
+            dataset = dataset.batch(batch_size, drop_remainder=True)
+        else:
+            dataset = dataset.batch(val_batch_size, drop_remainder=True)
+
+        dataset = dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
         train_val_datasets.append(dataset)
 
     ds_train, ds_val = train_val_datasets
@@ -282,7 +276,9 @@ def _preprocess_img(row, target_size):
     return img
 
 
-def _load_hdf_features(f, feature, n_shape, n_tex):
+def _load_hdf_features(f, feature, n_shape, n_tex, bg_size=(56, 56)):
+    """ Function to load in features from hdf5 file. To be used in
+    a .map method call from a Tensorflow Dataset object. """
     f = f.numpy().decode('utf-8')
     feature = feature.numpy().decode('utf-8')
     with h5py.File(f.replace('image.png', 'features.h5'), 'r') as f_in:
@@ -294,34 +290,14 @@ def _load_hdf_features(f, feature, n_shape, n_tex):
     if feature == 'shape' and n_shape != 0:
         data = data[:n_shape]
 
+    if feature == 'background':
+        data = Image.fromarray(data).resize(bg_size, Image.ANTIALIAS)
+        data = np.array(data)
+
     if feature in ('tex', 'background'):
         data = data.flatten()
     
     return data
-
-
-def create_mock_model(n_inp, n_out, in_shape=None, n_y=30):
-    # For testing purposes
-    from tensorflow.keras import Model
-    from tensorflow.keras.layers import Input, GlobalAveragePooling2D, Dense
-    
-    inp = []
-    for i in range(n_inp):
-        inp.append(Input(shape=in_shape[i], name=f'inp{i}'))
-    
-    out = []
-    for i in range(n_out):
-        x = GlobalAveragePooling2D()(inp[0])
-        y = Dense(units=n_y)(x)
-        out.append(y)
-
-    if len(inp) == 1:
-        inp = inp[0]
-        
-    if len(out) == 1:
-        out = out[0]
-    
-    return Model(inputs=inp, outputs=out)
 
 
 if __name__ == '__main__':

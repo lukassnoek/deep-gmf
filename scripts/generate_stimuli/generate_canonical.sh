@@ -1,0 +1,20 @@
+python scripts/generate_stimuli/generate_faces.py \
+    --out-dir /analyse/Project0257/lukas/data/canonical \
+    --n-id 4096 \
+    --n-var 1024 \
+    --genders M+F \
+    --ethns WC+EA \
+    --ages 25 50 \
+    --x-rot -30 30 \
+    --y-rot -30 30 \
+    --z-rot -30 30 \
+    --x-trans -50 50 \
+    --y-trans -50 50 \
+    --z-trans -25 25 \
+    --x-rot-lights -30 30 \
+    --y-rot-lights -30 30 \
+    --save-id-params \
+    --save-background \
+    --save-image-separately \
+    --camera-distance 350 \
+    --add-background

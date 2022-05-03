@@ -4,6 +4,7 @@ from .resnet import ResNet6, ResNet10, ResNet18, ResNet34
 from .pikenet import PikeNet
 from .vnet import VNet, VNet_skip
 from .vgg16 import VGG16
+from .stereonet import StereoNet
 
 
 MODELS = {
@@ -15,5 +16,6 @@ MODELS = {
     'ResNet18': ResNet18,
     'ResNet34': ResNet34,
     'PikeNet': PikeNet,
-    'VGG16': VGG16
+    'VGG16': VGG16,
+    'StereoNet': StereoNet
 }

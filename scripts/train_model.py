@@ -76,9 +76,12 @@ def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
     n_var_per_id : int
         How many images ("variations") per face ID should be used (default: all);
         nice for quick testing
-    n_coeff : int
-        Pick the first `n_coeff` coefficents to predict when the target is
-        'tex' or 'shape' (otherwise it's ignored; default: all)
+    n_shape : int
+        Number of shape components to load. Default is to load all (394)
+    n_tex : int
+        Number of texture components to load. Note that indicates `n_tex`
+        *per spatial frequency band*, so `n_tex = 5` gives (5 * 5 = ) 25
+        components
     query : str
         Query string to filter the feature dataframe; for example, "age < 50" or
         "(xr > -30) & (xr < 30)"
@@ -93,6 +96,8 @@ def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
         Which GPU to train the model on
     save_every_x_epochs : int
         After how many epochs the model should be saved
+    use_triplet_loss : bool
+        Whether to use triplet loss (`target` should be 'id')
     """
 
     if use_triplet_loss and 'id' not in target:
@@ -141,11 +146,11 @@ def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
                                 n_id_val=n_id_val, n_var_per_id=n_var_per_id,
                                 n_shape=n_shape, n_tex=n_tex, query=query,
                                 use_triplet_loss=use_triplet_loss)
-
+    
     # Create 'body' and add head to it, which may have
     # multiple outputs (depends on `target`)
     body = MODELS[model_name]()
-    
+
     if use_triplet_loss:
         model = add_embedding_head(body, n_embedding=512)
     else:
@@ -154,7 +159,8 @@ def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
     # Compile with pre-specified losses/metrics
     opt = Adam(learning_rate=lr)
     model.compile(optimizer=opt, loss=losses, metrics=metrics, loss_weights=weights)
-  
+    print(model.summary())
+
     target = '+'.join(list(target))
     if use_triplet_loss:
         target += 'triplet'

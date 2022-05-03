@@ -177,12 +177,12 @@ def ResNet10(input_shape=(224, 224, 3), bn_momentum=0.9):
     x = BatchNormalization(momentum=bn_momentum, name='layer9_bnorm')(x)
     x = Activation('relu', name='layer9_relu')(x)
 
-    #x = GlobalAveragePooling2D(name='layer9_globalpool')(x)
+    x = GlobalAveragePooling2D(name='layer9_globalpool')(x)
     # Note to self: use regular max pooling instead of
     # global max pooling, because the latter results in
     # too few features (512) for shape decoding
-    x = MaxPooling2D(strides=2, padding='valid', name='layer9_maxpool')(x)
-    x = Flatten(name='layer9_flatten')(x)
+    #x = MaxPooling2D(strides=2, padding='valid', name='layer9_maxpool')(x)
+    #x = Flatten(name='layer9_flatten')(x)
     
     # Create model
     model = Model(inputs=s, outputs=x, name='ResNet10')
