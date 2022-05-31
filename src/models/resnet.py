@@ -4,33 +4,37 @@ from tensorflow.keras.layers import BatchNormalization, MaxPooling2D, Add
 from tensorflow.keras.layers import GlobalAveragePooling2D, Flatten, Dense
 
 
-def ResBlockStack(filters, n_layers=2, kernel_size=3, stride=2, bn_momentum=0.01, block=1):
+def ResBlock(filters, kernel_sizes=(3, 3), n_blocks=2, bn_momentum=0.01, layer_nr=1, stage=1):
     """ Stack of ResNet (V2!) blocks with Conv2D layers and skip connections.
 
     * block = [layer, layer]
-    * stack = [block, block, ... , block]  (depends on `n_layers`)
+    * stack = [block, block, ... , block]  (depends on `n_blocks`)
     
-    Each stack consists of `n_layers` conv layers, which contain skip connections
-    after every 2 layers (i.e., after each 'block'). For simplicity, this
-    implementation assumes that the same number of filters is used throughout the
-    stack! Note that the `stride` parameter is only used in the first conv layer;
-    the subsequent conv layers always use a stride of 1, as to not downsample more
-    than once within the stack.
+    Each stack consists of `n_blocks` of a number of conv layers, which depends on the 
+    length of `filters` and `kernel_sizes`. For example, if we use `filters=(64, 64, 256)`
+    and `kernel_sizes=(1, 3, 1)` and `n_blocks=3` (like for ResNet50), then the structure
+    of this stack is as follows:
     
+    [conv64-1x1, conv64-3x3, conv256-1x1, conv64-1x1, conv64-3x3, conv256-1x1, conv64-1x1, conv64-3x3, conv256-1x1]
+    
+    There's a skip connection after each block, which contains a Conv2D operation
+    if the height or width does not match between the shortcut (`sc`) and current
+    feature map or when the numfer of filters doesn't match.
+   
     Parameters
     ----------
     filters : list
         List of number of filters per block
-    n_layers : int
-        Number of convolution layers per stack (default: 2)
-    kernel_size : int
-        Single kernel size (assumed to be square)
-    stride : int
-        Stride to use for convolution
+    kernel_sizes : list
+        Kernel sizes per block (assumed to be square)
+    n_blocks : int
+        Number of blocks (repetitions)
     bn_momentum : float
         Momentum used for batch norm layers
-    block : int
-        Index of block (to be used in layer names)
+    layer_nr : int
+        Current layer number (used in name only)
+    stage : int
+        Current stage
 
     Returns
     -------
@@ -38,55 +42,67 @@ def ResBlockStack(filters, n_layers=2, kernel_size=3, stride=2, bn_momentum=0.01
         Function that applies the convolutional block
     """
 
-    if n_layers < 2:
-        raise ValueError("Number of layers should be 2 or more!")
+    if len(kernel_sizes) != len(filters):
+        raise ValueError("Nr of kernel sizes should be equal to nr of filters!")
 
-    def apply(x):
+    def apply(x, layer_nr=layer_nr):
         """ Applies the block to the input x. """
 
-        sc = x  # always define the shortcut at the start of the block
+        for block_nr in range(n_blocks):
 
-        # First conv layer usually downsamples using a stride of 2
-        name = f'layer{(block-1) * n_layers + 2}_block-{block}'
-        x = BatchNormalization(momentum=bn_momentum, name=f'{name}_bnorm')(x)
-        x = Activation('relu', name=f'{name}_relu')(x)
-        x = Conv2D(filters, kernel_size, stride, padding='same',
-                   kernel_initializer='he_normal',
-                   name=f'{name}_conv')(x)
+            sc = x  # always define the shortcut at the start of the block
+        
+            for i, (nf, ks) in enumerate(zip(filters, kernel_sizes)):
+                
+                if block_nr == 0 and i == 0:
+                    if stage == 1:
+                        stride = 1
+                    else:
+                        stride = 2
+                else:
+                    stride = 1           
 
-        # Subsequent layers use the same number of filters, but a stride of 1        
-        for i in range(1, n_layers):
-            
-            # Every even layer, define a shortcut (skip connection)
-            if i % 2 == 0:
-                sc = x  # sc = shortcut
-            
-            # Regular conv layer with a stride of 1 (no downsampling)
-            name = f'layer{(block-1) * n_layers + 2 + i}_block-{block}'
-            x = BatchNormalization(momentum=bn_momentum, name=f'{name}_bnorm')(x)
-            x = Activation('relu', name=f'{name}_relu')(x)
-            x = Conv2D(filters, kernel_size, 1, padding='same',
-                    kernel_initializer='he_normal',
-                    name=f'{name}_conv')(x)
-            
-            # At odd layers, add the shortcut!
-            if i % 2 != 0:
-                # In the first skip connection within the stack, we need to
-                # downsample the shortcut because of the downsampling happening
-                # in the first conv layer
-                if i == 1:
-                    # Note to self: in this implementation of ResNet, the number of filters
-                    # are assumed to always be the same *within a block* 
-                    # Also: kernel size is always 1 when downsampling!
-                    sc = Conv2D(filters, 1, stride, padding='same',
-                                kernel_initializer='he_normal',
-                                name=f'{name}_conv_shortcut')(sc)
+                name = f'layer{layer_nr}_block-{block_nr+1}_stage-{stage}'
+                x = BatchNormalization(momentum=bn_momentum, name=f'{name}_bnorm')(x)
+                x = Activation('relu', name=f'{name}_relu')(x)
+                x = Conv2D(nf, ks, stride, padding='same', kernel_initializer='he_normal',
+                           name=f'{name}_conv')(x)
+                layer_nr += 1
 
-                # Add skip connection
-                x = Add(name=f'{name}_add')([x, sc])
+            mismatch_nf = sc.shape[-1] != nf
+            mismatch_hw = block_nr == 0 and stage != 1
+            
+            if mismatch_nf or mismatch_hw:
+                if mismatch_hw:
+                    stride = 2
+                else:
+                    stride = 1
+
+                sc = Conv2D(nf, 1, stride, padding='same',
+                            kernel_initializer='he_normal',
+                            name=f'{name}_conv_shortcut')(sc)
+
+            x = Add(name=f'{name}_add')([x, sc])
 
         return x
 
+    return apply
+
+
+def Stem(bn_momentum=0.01):
+    
+    def apply(s):
+        
+        # ResNet initial block: Conv block + Maxpool
+        x = Conv2D(64, 7, 2, padding='same',  # 64 filters, kernel size 7, stride 2
+                   kernel_initializer='he_normal',
+                   name='layer1_conv')(s)
+        x = BatchNormalization(momentum=bn_momentum, name='layer1_bnorm')(x)
+        x = Activation('relu', name='layer1_relu')(x)
+        x = MaxPooling2D(3, 2, padding='same', name='layer1_pool')(x)
+
+        return x
+    
     return apply
 
 
@@ -107,22 +123,14 @@ def ResNet6(input_shape=(224, 224, 3), bn_momentum=0.01):
     """    
     
     s = Input(input_shape, name='layer0_input')  # s = stimulus
+    x = Stem()(s)
 
-    # ResNet initial block: Conv block + Maxpool
-    x = Conv2D(64, 7, 2, padding='same',  # 64 filters, kernel size 7, stride 2
-               kernel_initializer='he_normal',
-               name='layer1_conv')(s)
-    x = BatchNormalization(momentum=bn_momentum, name='layer1_bnorm')(x)
-    x = Activation('relu', name='layer1_relu')(x)
-    x = MaxPooling2D(3, 2, padding='same', name='layer1_pool')(x)
-
-    # Add four residual conv blocks with an increasing number of filters,
-    n_filters = [64, 128]
-    for i, nf in enumerate(n_filters):
-        # Use a stride of 1 if it's the first block, else 2 for downsampling
-        stride = 1 if i == 0 else 2
-        x = ResBlockStack(nf, kernel_size=3, stride=stride, bn_momentum=bn_momentum, block=i+1)(x)
-
+    # Stage 1
+    x = ResBlock((64,), (3,), n_blocks=2, bn_momentum=bn_momentum, layer_nr=2, stage=1)(x)
+    
+    # Stage 2
+    x = ResBlock((128,), (3,), n_blocks=2, bn_momentum=bn_momentum, layer_nr=4, stage=2)(x)
+    
     # Post-activation
     x = BatchNormalization(momentum=bn_momentum, name='layer5_bnorm')(x)
     x = Activation('relu', name='layer5_relu')(x)
@@ -157,36 +165,31 @@ def ResNet10(input_shape=(224, 224, 3), bn_momentum=0.9):
     """    
     
     s = Input(input_shape, name='layer0_input')  # s = stimulus
-    
-    # ResNet initial block: Conv block + Maxpool
-    x = Conv2D(64, 7, 2, padding='same',  # 64 filters, kernel size 7, stride 2
-               kernel_initializer='he_normal',
-               name='layer1_conv')(s)
-    x = BatchNormalization(momentum=bn_momentum, name='layer1_bnorm')(x)
-    x = Activation('relu', name='layer1_relu')(x)
-    x = MaxPooling2D(3, 2, padding='same', name='layer1_pool')(x)
+    x = Stem()(s)
 
-    # Add four residual conv blocks with an increasing number of filters,
-    n_filters = [64, 128, 256, 512]
-    for i, nf in enumerate(n_filters):
-        # Use a stride of 1 if it's the first block, else 2 for downsampling
-        stride = 1 if i == 0 else 2
-        x = ResBlockStack(nf, kernel_size=3, stride=stride, bn_momentum=bn_momentum, block=i+1)(x)
+    # Stage 1
+    x = ResBlock((64,), (3,), n_blocks=2, bn_momentum=bn_momentum, layer_nr=2, stage=1)(x)
+    
+    # Stage 2
+    x = ResBlock((128,), (3,), n_blocks=2, bn_momentum=bn_momentum, layer_nr=4, stage=2)(x)
+    
+    # Stage 3
+    x = ResBlock((256,), (3,), n_blocks=2, bn_momentum=bn_momentum, layer_nr=6, stage=3)(x)
+    
+    # Stage 4
+    x = ResBlock((512,), (3,), n_blocks=2, bn_momentum=bn_momentum, layer_nr=8, stage=4)(x)
 
     # Post-activation
     x = BatchNormalization(momentum=bn_momentum, name='layer9_bnorm')(x)
     x = Activation('relu', name='layer9_relu')(x)
 
+    # Average feature maps per filter (resulting in 512 values)
     x = GlobalAveragePooling2D(name='layer9_globalpool')(x)
-    # Note to self: use regular max pooling instead of
-    # global max pooling, because the latter results in
-    # too few features (512) for shape decoding
-    #x = MaxPooling2D(strides=2, padding='valid', name='layer9_maxpool')(x)
-    #x = Flatten(name='layer9_flatten')(x)
     
-    # Create model
-    model = Model(inputs=s, outputs=x, name='ResNet10')
-    
+    # There is no classification top/head by default!
+    # Note: ends at layer 5, because dense layer (to be added)
+    # represents layer 6
+    model = Model(inputs=s, outputs=x, name='ResNet10')    
     return model
 
 
@@ -209,21 +212,19 @@ def ResNet18(input_shape=(224, 224, 3), bn_momentum=0.01):
     """    
     
     s = Input(input_shape, name='layer0_input')  # s = stimulus
-    
-    # ResNet initial block: Conv block + Maxpool
-    x = Conv2D(64, 7, 2, padding='same',  # 64 filters, kernel size 7, stride 2
-               kernel_initializer='he_normal',
-               name='layer1_conv')(s)
-    x = BatchNormalization(momentum=bn_momentum, name='layer1_bnorm')(x)
-    x = Activation('relu', name='layer1_relu')(x)
-    x = MaxPooling2D(3, 2, padding='same', name='layer1_pool')(x)
+    x = Stem()(s)
 
-    # Add four residual conv blocks with an increasing number of filters,
-    n_filters = [64, 128, 256, 512]
-    for i, nf in enumerate(n_filters):
-        # Use a stride of 1 if it's the first block, else 2 for downsampling
-        stride = 1 if i == 0 else 2
-        x = ResBlockStack(nf, n_layers=4, kernel_size=3, stride=stride, bn_momentum=bn_momentum, block=i+1)(x)
+    # Stage 1
+    x = ResBlock((64, 64), (3, 3), n_blocks=2, bn_momentum=bn_momentum, layer_nr=2, stage=1)(x)
+    
+    # Stage 2
+    x = ResBlock((128, 128), (3, 3), n_blocks=2, bn_momentum=bn_momentum, layer_nr=6, stage=2)(x)
+    
+    # Stage 3
+    x = ResBlock((256, 256), (3, 3), n_blocks=2, bn_momentum=bn_momentum, layer_nr=10, stage=3)(x)
+    
+    # Stage 4
+    x = ResBlock((512, 512), (3, 3), n_blocks=2, bn_momentum=bn_momentum, layer_nr=14, stage=4)(x)
 
     # Post-activation
     x = BatchNormalization(momentum=bn_momentum, name='layer17_bnorm')(x)
@@ -232,8 +233,10 @@ def ResNet18(input_shape=(224, 224, 3), bn_momentum=0.01):
     # Average feature maps per filter (resulting in 512 values)
     x = GlobalAveragePooling2D(name='layer17_globalpool')(x)
     
-    # Create model
-    model = Model(inputs=s, outputs=x, name='ResNet18')
+    # There is no classification top/head by default!
+    # Note: ends at layer 5, because dense layer (to be added)
+    # represents layer 6
+    model = Model(inputs=s, outputs=x, name='ResNet18')    
     
     return model
 
@@ -257,21 +260,19 @@ def ResNet34(input_shape=(224, 224, 3), bn_momentum=0.01):
     """    
     
     s = Input(input_shape, name='layer0_input')  # s = stimulus
-    
-    # ResNet initial block: Conv block + Maxpool
-    x = Conv2D(64, 7, 2, padding='same',  # 64 filters, kernel size 7, stride 2
-               kernel_initializer='he_normal',
-               name='layer1_conv')(s)
-    x = BatchNormalization(momentum=bn_momentum, name='layer1_bnorm')(x)
-    x = Activation('relu', name='layer1_relu')(x)
-    x = MaxPooling2D(3, 2, padding='same', name='layer1_pool')(x)
+    x = Stem()(s)
 
-    n_filters = [64, 128, 256, 512]
-    n_layers = [6, 8, 12, 6]
-    for i, (nf, nl) in enumerate(zip(n_filters, n_layers)):
-        # Use a stride of 1 if it's the first block, else 2 for downsampling
-        stride = 1 if i == 0 else 2
-        x = ResBlockStack(nf, n_layers=nl, kernel_size=3, stride=stride, bn_momentum=bn_momentum, block=i+1)(x)
+    # Stage 1
+    x = ResBlock((64, 64), (3, 3), n_blocks=3, bn_momentum=bn_momentum, layer_nr=2, stage=1)(x)
+    
+    # Stage 2
+    x = ResBlock((128, 128), (3, 3), n_blocks=4, bn_momentum=bn_momentum, layer_nr=8, stage=2)(x)
+    
+    # Stage 3
+    x = ResBlock((256, 256), (3, 3), n_blocks=6, bn_momentum=bn_momentum, layer_nr=16, stage=3)(x)
+    
+    # Stage 4
+    x = ResBlock((512, 512), (3, 3), n_blocks=3, bn_momentum=bn_momentum, layer_nr=28, stage=4)(x)
 
     # Post-activation
     x = BatchNormalization(momentum=bn_momentum, name='layer33_bnorm')(x)
@@ -280,17 +281,114 @@ def ResNet34(input_shape=(224, 224, 3), bn_momentum=0.01):
     # Average feature maps per filter (resulting in 512 values)
     x = GlobalAveragePooling2D(name='layer33_globalpool')(x)
     
-    # Create model
-    model = Model(inputs=s, outputs=x, name='ResNet34')
-    
+    # There is no classification top/head by default!
+    # Note: ends at layer 5, because dense layer (to be added)
+    # represents layer 6
+    model = Model(inputs=s, outputs=x, name='ResNet34')    
+       
     return model
     
+
+def ResNet50(input_shape=(224, 224, 3), bn_momentum=0.01):
+    """ ResNet50 model.
+    
+    Parameters
+    ----------
+    input_shape : tuple
+        Tuple with length 3 (x, y, channels)
+    n_classes : int
+        Number of output classes
+    bn_momentum : float
+        Momentum used for batch norm layers
+
+    Returns
+    -------
+    model : Model
+        Keras model
+    """    
+    
+    s = Input(input_shape, name='layer0_input')  # s = stimulus
+    x = Stem()(s)
+
+    # Stage 1
+    x = ResBlock((64, 64, 256), (1, 3, 1), n_blocks=3, bn_momentum=bn_momentum, layer_nr=2, stage=1)(x)
+    
+    # Stage 2
+    x = ResBlock((128, 128, 512), (1, 3, 1), n_blocks=4, bn_momentum=bn_momentum, layer_nr=11, stage=2)(x)
+    
+    # Stage 3
+    x = ResBlock((256, 256, 1024), (1, 3, 1), n_blocks=6, bn_momentum=bn_momentum, layer_nr=23, stage=3)(x)
+    
+    # Stage 4
+    x = ResBlock((512, 512, 2048), (1, 3, 1), n_blocks=3, bn_momentum=bn_momentum, layer_nr=41, stage=4)(x)
+
+    # Post-activation
+    x = BatchNormalization(momentum=bn_momentum, name='layer49_bnorm')(x)
+    x = Activation('relu', name='layer49_relu')(x)
+
+    # Average feature maps per filter (resulting in 512 values)
+    x = GlobalAveragePooling2D(name='layer49_globalpool')(x)
+    
+    # There is no classification top/head by default!
+    # Note: ends at layer 5, because dense layer (to be added)
+    # represents layer 6
+    model = Model(inputs=s, outputs=x, name='ResNet50')    
+       
+    return model
+
+
+def ResNet101(input_shape=(224, 224, 3), bn_momentum=0.01):
+    """ ResNet101 model.
+    
+    Parameters
+    ----------
+    input_shape : tuple
+        Tuple with length 3 (x, y, channels)
+    n_classes : int
+        Number of output classes
+    bn_momentum : float
+        Momentum used for batch norm layers
+
+    Returns
+    -------
+    model : Model
+        Keras model
+    """    
+    
+    s = Input(input_shape, name='layer0_input')  # s = stimulus
+    x = Stem()(s)
+
+    # Stage 1
+    x = ResBlock((64, 64, 256), (1, 3, 1), n_blocks=3, bn_momentum=bn_momentum, layer_nr=2, stage=1)(x)
+    
+    # Stage 2
+    x = ResBlock((128, 128, 512), (1, 3, 1), n_blocks=4, bn_momentum=bn_momentum, layer_nr=11, stage=2)(x)
+    
+    # Stage 3
+    x = ResBlock((256, 256, 1024), (1, 3, 1), n_blocks=23, bn_momentum=bn_momentum, layer_nr=23, stage=3)(x)
+    
+    # Stage 4
+    x = ResBlock((512, 512, 2048), (1, 3, 1), n_blocks=3, bn_momentum=bn_momentum, layer_nr=92, stage=4)(x)
+
+    # Post-activation
+    x = BatchNormalization(momentum=bn_momentum, name='layer100_bnorm')(x)
+    x = Activation('relu', name='layer100_relu')(x)
+
+    # Average feature maps per filter (resulting in 512 values)
+    x = GlobalAveragePooling2D(name='layer100_globalpool')(x)
+    
+    # There is no classification top/head by default!
+    # Note: ends at layer 5, because dense layer (to be added)
+    # represents layer 6
+    model = Model(inputs=s, outputs=x, name='ResNet101')    
+       
+    return model
 
 
 if __name__ == '__main__':
 
     # Initialize and compile model
-    model = ResNet10()
+    model = ResNet50()
     model.compile(optimizer='adam', loss='categorical_crossentropy', metrics='accuracy')
     print(model.summary())
     

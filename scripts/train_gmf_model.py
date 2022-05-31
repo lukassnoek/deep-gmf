@@ -1,11 +1,11 @@
+import os
+#os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  
+
 import sys
 import click
-import shutil
-import atexit
 import pandas as pd
 import tensorflow as tf
 from pathlib import Path
-from tensorflow.keras.callbacks import ModelCheckpoint
 from tensorflow.keras.optimizers import Adam
 from tensorflow_addons.losses import TripletSemiHardLoss
 
@@ -13,6 +13,7 @@ sys.path.append('.')
 from src.models import MODELS
 from src.losses import AngleLoss
 from src.io import create_dataset
+from src.models.utils import EarlyStoppingOnLoss
 from src.models.utils import add_prediction_head, add_embedding_head
 
 
@@ -48,11 +49,12 @@ TARGET_INFO = {
 @click.option('--epochs', default=10)
 @click.option('--lr', default=1e-4)
 @click.option('--gpu-id', default=0)
-@click.option('--save-every-x-epochs', default=10)
+@click.option('--n-cpu', default=10)
 @click.option('--use-triplet-loss', is_flag=True)
+@click.option('--stop-on-val-loss', default=None, type=click.FLOAT)
 def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
          n_var_per_id, n_shape, n_tex, query, image_size, epochs,
-         lr, gpu_id, save_every_x_epochs, use_triplet_loss):
+         lr, gpu_id, n_cpu, use_triplet_loss, stop_on_val_loss):
     """ Main training function.
     
     Parameters
@@ -94,8 +96,6 @@ def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
         Learning rate for Adam optimizer
     gpu_id : int
         Which GPU to train the model on
-    save_every_x_epochs : int
-        After how many epochs the model should be saved
     use_triplet_loss : bool
         Whether to use triplet loss (`target` should be 'id')
     """
@@ -145,8 +145,8 @@ def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
                                 batch_size=batch_size, n_id_train=n_id_train,
                                 n_id_val=n_id_val, n_var_per_id=n_var_per_id,
                                 n_shape=n_shape, n_tex=n_tex, query=query,
-                                use_triplet_loss=use_triplet_loss)
-    
+                                use_triplet_loss=use_triplet_loss, n_cpu=n_cpu)
+
     # Create 'body' and add head to it, which may have
     # multiple outputs (depends on `target`)
     body = MODELS[model_name]()
@@ -159,7 +159,6 @@ def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
     # Compile with pre-specified losses/metrics
     opt = Adam(learning_rate=lr)
     model.compile(optimizer=opt, loss=losses, metrics=metrics, loss_weights=weights)
-    print(model.summary())
 
     target = '+'.join(list(target))
     if use_triplet_loss:
@@ -168,25 +167,17 @@ def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
     model_dir = Path(f'trained_models/{model.name}_dataset-{dataset}_target-{target}')       
     model_dir.mkdir(parents=True, exist_ok=True)
 
-    # Note that cardinality refers to number of steps per epoch when
-    # the dataset is batched (like it is here)!
-    steps_per_epoch = train.cardinality().numpy()  # for nice stdout
-    
-    callbacks = [ModelCheckpoint(
-        filepath=str(model_dir) + '/epoch-{epoch:03d}',
-        save_best_only=False,
-        save_weights_only=False,
-        # Save every x epochs
-        save_freq=int(steps_per_epoch * save_every_x_epochs),
-    )]
-
     # Save untrained model as well!
-    model.save(f"{model_dir}/epoch-{'0'.zfill(3)}")
+    #model.save(f"{model_dir}/epoch-{'0'.zfill(3)}")
+
+    callbacks = []
+    if stop_on_val_loss is not None:
+        callbacks.append(EarlyStoppingOnLoss(value=stop_on_val_loss, verbose=0))
+        epochs = 100
 
     # Train and save both model and history (loss/accuracy across epochs)
     with tf.device(f'/gpu:{gpu_id}'):
-        history = model.fit(train, validation_data=val, epochs=epochs,
-                            callbacks=callbacks)
+        history = model.fit(train, validation_data=val, epochs=epochs, callbacks=callbacks)
 
     epochs = len(history.history['loss'])  # check actual number of epochs!
     model.save(f"{model_dir}/epoch-{epochs:03d}")

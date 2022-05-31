@@ -48,16 +48,19 @@ def main(dataset_name, n_id_train, n_id_val, n_id_test, n_per_id):
     """
 
     data_dir = Path(f'/analyse/Project0257/lukas/data/{dataset_name}')
-    files = data_dir.glob('**/*_image.png')
+    files = data_dir.glob('**/*_image.jpg')
     info = defaultdict(list)  # keep track of features
 
     exp_total_files = sum([n_id_train, n_id_val, n_id_test]) * n_per_id    
     for i, f in tqdm(enumerate(files), total=exp_total_files):
         f = str(f)
         info['image_path'].append(f)
-        feat = f.replace('_image.png', '_features.h5')
-        info['feature_path'].append(feat)
+        feat = f.replace('_image.jpg', '_features.h5')
+        if not Path(feat).is_file():
+            raise ValueError(f"File {feat} does not exist!")
 
+        info['feature_path'].append(feat)
+        
         with h5py.File(feat, mode='r') as f_in:
 
             # Store all single value features as attributes

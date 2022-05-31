@@ -21,12 +21,12 @@ def create_casia_webface_dataset():
 
 
 def create_test_dataset(df_test, batch_size=256, target_size=(224, 224, 3),
-                        n_shape=None, n_tex=None):
+                        n_shape=None, n_tex=None, n_cpu=20):
     
     # Note to self: no reason to shuffle dataset for testing!
     df_dataset = tf.data.Dataset.from_tensor_slices(dict(df_test))
     dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size),
-                             num_parallel_calls=tf.data.AUTOTUNE)
+                             num_parallel_calls=n_cpu)
     
     n_shape = 0 if n_shape is None else n_shape
     n_tex = 0 if n_tex is None else n_tex
@@ -40,13 +40,13 @@ def create_test_dataset(df_test, batch_size=256, target_size=(224, 224, 3),
                     row['image_path'], feat, n_shape, n_tex],
                 Tout=tf.float32,
             ),
-            num_parallel_calls=tf.data.AUTOTUNE
+            num_parallel_calls=n_cpu
         )
         shape_tex_bg.append(ds)
 
     dataset = tf.data.Dataset.zip((dataset, *shape_tex_bg))
     dataset = dataset.batch(batch_size, drop_remainder=True)
-    dataset = dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
+    dataset = dataset.prefetch(buffer_size=n_cpu)
     # Get rid of tf stdout vomit
     #options = tf.data.Options()
     #options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF
@@ -58,7 +58,7 @@ def create_test_dataset(df_test, batch_size=256, target_size=(224, 224, 3),
 def create_dataset(df, Y_col='id', batch_size=256,
                    n_id_train=None, n_id_val=None, n_var_per_id=None, n_shape=None,
                    n_tex=None, query=None, target_size=(224, 224, 3), shuffle=True,
-                   cache=False, use_triplet_loss=False):
+                   cache=False, use_triplet_loss=False, n_cpu=10):
 
     # Never train a model on test-set stimuli
     df = df.query("split != 'testing'")
@@ -172,7 +172,7 @@ def create_dataset(df, Y_col='id', batch_size=256,
                 slu = StringLookup(output_mode='one_hot', num_oov_indices=0)
                 slu.adapt(df_comb[col].unique())
                 cat_encoders[col] = slu
-    
+
     if shuffle:
         # Make sure first epoch is also shuffled?
         df_train = df_train.sample(frac=1)
@@ -182,13 +182,13 @@ def create_dataset(df, Y_col='id', batch_size=256,
         # Note to self: Dataset.list_files automatically sorts the input,
         # undoing the df.sample randomization! So use from_tensor_slices instead
         df_dataset = tf.data.Dataset.from_tensor_slices(dict(df_))
-        if shuffle and ds_name == 'training':
-            df_dataset = df_dataset.shuffle(buffer_size=df_.shape[0], reshuffle_each_iteration=True)
+        #if shuffle and ds_name == 'training':
+        #    df_dataset = df_dataset.shuffle(buffer_size=df_.shape[0], reshuffle_each_iteration=True)
     
         # Load img + resize + normalize (/255)
         # Do not overwrite files_dataset, because we need it later
         X_dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size),
-                                   num_parallel_calls=tf.data.AUTOTUNE)
+                                   num_parallel_calls=n_cpu)
 
         # Extract and preprocess output (Y) vars
         ds_tmp = []
@@ -204,30 +204,23 @@ def create_dataset(df, Y_col='id', batch_size=256,
                     lambda row: tf.py_function(
                         func=_load_hdf_features, inp=[row['image_path'], col, n_shape, n_tex], Tout=tf.float32,
                     ),
-                    num_parallel_calls=tf.data.AUTOTUNE
+                    num_parallel_calls=n_cpu
                 )
                 ds_tmp.append(ds)  # add to temporary dataset tuple
                 continue  # skip rest of block
-            
-            # Use df column as tensor slices, to be preprocessed
-            # in a way depending on whether it's a categorical or
-            # continuous variable
-            ds = df_dataset.map(lambda row: row[col],
-                num_parallel_calls=tf.data.AUTOTUNE
-            )
 
             if col in CAT_COLS:
                 # Use previously created StringLookup layers
                 # to one-hot encode string values
-                ds = ds.map(lambda x: cat_encoders[col](x),
-                            num_parallel_calls=tf.data.AUTOTUNE)
+                ds = df_dataset.map(lambda x: cat_encoders[col](x[col]),
+                                    num_parallel_calls=n_cpu)
                 
                 if col == 'id' and use_triplet_loss:
                     ds = ds.map(lambda x: tf.math.argmax(x))
 
             elif col in CONT_COLS:
                 # Cast to float32 (necessary for e.g. rotation params)
-                ds = ds.map(lambda x: tf.cast(x, tf.float32))
+                ds = df_dataset.map(lambda x: tf.cast(x[col], tf.float32))
             else:
                 raise ValueError("Not sure whether {col} is categorical or continuous!")
 
@@ -240,7 +233,7 @@ def create_dataset(df, Y_col='id', batch_size=256,
 
         # Merge inputs (X, Z) with outputs (Y)
         dataset = tf.data.Dataset.zip((X_dataset, ds_tmp))
-    
+        
         # Get rid of tf stdout vomit
         options = tf.data.Options()
         options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF
@@ -249,8 +242,8 @@ def create_dataset(df, Y_col='id', batch_size=256,
         if cache:
             dataset = dataset.cache()
 
-        #if ds_name == 'training':
-        #    dataset = dataset.shuffle(df_.shape[0], reshuffle_each_iteration=True)
+        if ds_name == 'training':
+            dataset = dataset.shuffle(2**14, reshuffle_each_iteration=True)
 
         # Optimization tricks (drop_remainder is necessary for multi-GPU
         # training, don't know why)

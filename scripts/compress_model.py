@@ -38,12 +38,12 @@ def main(model_path, n_comp, n_batches, batch_size, gpu_id, cpu):
     dataset = model_name.split('dataset-')[1].split('_')[0]
     info = pd.read_csv(f'/analyse/Project0257/lukas/data/{dataset}.csv')
     train_data, _ = create_dataset(info, Y_col='shape', batch_size=batch_size)
-    
+
     # Load model
     model = load_model(model_path, custom_objects={'AngleLoss': AngleLoss})
 
     # Analyze only relevant layers, to speed up compression
-    layers2analyze = ['conv', 'globalpool', 'flatten', 'input']    
+    layers2analyze = ['conv', 'globalpool', 'input']    
     layers = [l for l in model.layers if 'shortcut' not in l.name]
     layers = [l for l in layers if any([l2a in l.name for l2a in layers2analyze])]
 
@@ -80,7 +80,7 @@ def main(model_path, n_comp, n_batches, batch_size, gpu_id, cpu):
         # Save PCA mean and component parameters (and expl. variance)       
         grp.create_dataset('mu', data=pca.mean_)
         grp.create_dataset('W', data=pca.components_)
-        #grp.attrs['explained_variance'] = pca.explained_variance_ratio_.numpy().sum()
+        grp.attrs['explained_variance'] = pca.explained_variance_ratio_.numpy().sum()
 
     f_out.close()
 

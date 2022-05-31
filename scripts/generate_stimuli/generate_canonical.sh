@@ -17,4 +17,5 @@ python scripts/generate_stimuli/generate_faces.py \
     --save-background \
     --save-image-separately \
     --camera-distance 350 \
+    --image-format jpg \
     --add-background

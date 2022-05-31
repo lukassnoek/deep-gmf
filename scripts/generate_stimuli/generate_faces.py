@@ -80,7 +80,7 @@ def main(out_dir, n_id, n_var, add_background, image_resolution, image_format, s
     # To init a camera, a model should exist, so using base_nf
     base_nf.attach(ctx)
     ctx._camera[0] = Camera(
-        ctx.win, image_resolution, (renderscale, renderscale),
+        ctx.win, image_resolution, renderscale,
         target=[-11.5644, -13.0381, 0],
         eye = [-11.5644, -13.0381, camera_distance],
         up = [0, 1, 0],
