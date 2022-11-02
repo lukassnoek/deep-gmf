@@ -27,3 +27,6 @@ Messing around with training models that predict shape (even just a single shape
 
 ### 11 Mar 2022
 Experimenting with how many variations per ID you need to train a simple ResNet10 to classify ID. Weirdly, fewer variations is possible when setting the learning rate a lot higher. So far, it works for 32 variations per ID with a learning rate of 0.005 (not higher!).
+
+### 28 Jun 2022
+Training custom Resnet50 networks with ArcFace loss on the MS1M dataset. The tf2-arcface config (5 epochs) is too little to get a reasonably low loss. Setting it to 16 epochs gets it down to ~5.5. Accuracy is around 0.4. Although the original paper used a loss of 0.1 and reduced it to 0.01 at 100,000 iterations and again to 0.001 at 160,000 iterations, I found that setting it to 0.01 gets a better loss value.

@@ -1,21 +1,18 @@
 python scripts/generate_stimuli/generate_faces.py \
-    --out-dir /analyse/Project0257/lukas/data/canonical \
-    --n-id 4096 \
-    --n-var 1024 \
+    --out-dir /analyse/Project0257/lukas/data/gmf_112x112new \
+    --n-id 8192 \
+    --n-var 64 \
     --genders M+F \
     --ethns WC+EA \
     --ages 25 50 \
     --x-rot -30 30 \
     --y-rot -30 30 \
     --z-rot -30 30 \
-    --x-trans -50 50 \
-    --y-trans -50 50 \
-    --z-trans -25 25 \
-    --x-rot-lights -30 30 \
-    --y-rot-lights -30 30 \
+    --x-rot-lights -90 90 \
+    --y-rot-lights -90 90 \
     --save-id-params \
-    --save-background \
     --save-image-separately \
-    --camera-distance 350 \
+    --camera-distance 250 \
     --image-format jpg \
+    --image-resolution 112 112 \
     --add-background

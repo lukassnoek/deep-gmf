@@ -2,19 +2,21 @@ import os
 #os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  
 
 import sys
+import time
 import click
 import pandas as pd
 import tensorflow as tf
 from pathlib import Path
-from tensorflow.keras.optimizers import Adam
-from tensorflow_addons.losses import TripletSemiHardLoss
+from tensorflow.keras.optimizers import Adam, SGD
+from tensorflow.keras import mixed_precision
+from tensorflow.keras.callbacks import TensorBoard, ReduceLROnPlateau
 
 sys.path.append('.')
 from src.models import MODELS
 from src.losses import AngleLoss
 from src.io import create_dataset
 from src.models.utils import EarlyStoppingOnLoss
-from src.models.utils import add_prediction_head, add_embedding_head
+from src.models.utils import add_prediction_head
 
 
 TARGET_INFO = {
@@ -36,7 +38,7 @@ TARGET_INFO = {
 
 @click.command()
 @click.argument('model_name', type=click.Choice(MODELS.keys()))
-@click.option('--dataset', default='manyIDfewIMG')
+@click.option('--dataset', default='gmf_112x112')
 @click.option('-t', '--target', type=click.STRING, default=['id'], multiple=True)
 @click.option('--batch-size', type=click.INT, default=256)
 @click.option('--n-id-train', type=click.INT, default=None)
@@ -45,16 +47,16 @@ TARGET_INFO = {
 @click.option('--n-shape', type=click.INT, default=None)
 @click.option('--n-tex', type=click.INT, default=None)
 @click.option('--query', type=str, default=None)
-@click.option('--image-size', default=224)
+@click.option('--image-size', default=112)
 @click.option('--epochs', default=10)
 @click.option('--lr', default=1e-4)
 @click.option('--gpu-id', default=0)
-@click.option('--n-cpu', default=10)
-@click.option('--use-triplet-loss', is_flag=True)
+@click.option('--n-cpu', default=32)
 @click.option('--stop-on-val-loss', default=None, type=click.FLOAT)
+@click.option('--binocular', is_flag=True)
 def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
          n_var_per_id, n_shape, n_tex, query, image_size, epochs,
-         lr, gpu_id, n_cpu, use_triplet_loss, stop_on_val_loss):
+         lr, gpu_id, n_cpu, stop_on_val_loss, binocular):
     """ Main training function.
     
     Parameters
@@ -96,15 +98,21 @@ def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
         Learning rate for Adam optimizer
     gpu_id : int
         Which GPU to train the model on
-    use_triplet_loss : bool
-        Whether to use triplet loss (`target` should be 'id')
     """
 
-    if use_triplet_loss and 'id' not in target:
-        raise ValueError("Triplet loss can only be used with target 'id'!")
-
+    #strategy = tf.distribute.MirroredStrategy(devices=["/gpu:0", "/gpu:1", "/gpu:2", '/gpu:3'])
+    strategy = tf.distribute.OneDeviceStrategy(f'/gpu:{gpu_id}')
+    batch_size *= strategy.num_replicas_in_sync
+    
     # Load dataset info to pass to `create_dataset`
     info = pd.read_csv(f'/analyse/Project0257/lukas/data/{dataset}.csv')
+    # Create training and validation set with a specific target variable(s)
+    target_size = (image_size, image_size, 3)
+    train, val = create_dataset(info, Y_col=target, target_size=target_size,
+                                batch_size=batch_size, n_id_train=n_id_train,
+                                n_id_val=n_id_val, n_var_per_id=n_var_per_id,
+                                n_shape=n_shape, n_tex=n_tex, query=query,
+                                n_cpu=n_cpu, arcface=model_name == 'ArcFace', binocular=binocular)
 
     # Infer number of output variables, loss function(s), and metric(s)
     # for each target (may be >1)
@@ -134,55 +142,47 @@ def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
             metrics[t] = TARGET_INFO[t]['metric']
             weights[t] = TARGET_INFO[t]['weight']
 
-    if use_triplet_loss:
-        losses = TripletSemiHardLoss()
-        metrics = None
-        weights = None
+    mixed_precision.set_global_policy('mixed_float16')
+    
+    with strategy.scope():
+        # Create 'body' and add head to it, which may have
+        # multiple outputs (depends on `target`)
+        body_class = MODELS[model_name]
+        if model_name == 'ArcFace':
+            model = body_class(input_shape=target_size, num_classes=n_out[-1])
+        else:
+            body = body_class(input_shape=target_size)
+            model = add_prediction_head(body, target, n_out)
 
-    # Create training and validation set with a specific target variable(s)
-    target_size = (image_size, image_size, 3)
-    train, val = create_dataset(info, Y_col=target, target_size=target_size,
-                                batch_size=batch_size, n_id_train=n_id_train,
-                                n_id_val=n_id_val, n_var_per_id=n_var_per_id,
-                                n_shape=n_shape, n_tex=n_tex, query=query,
-                                use_triplet_loss=use_triplet_loss, n_cpu=n_cpu)
-
-    # Create 'body' and add head to it, which may have
-    # multiple outputs (depends on `target`)
-    body = MODELS[model_name]()
-
-    if use_triplet_loss:
-        model = add_embedding_head(body, n_embedding=512)
-    else:
-        model = add_prediction_head(body, target, n_out)
-
-    # Compile with pre-specified losses/metrics
-    opt = Adam(learning_rate=lr)
-    model.compile(optimizer=opt, loss=losses, metrics=metrics, loss_weights=weights)
+        # Compile with pre-specified losses/metrics
+        #opt = SGD(learning_rate=0.001, momentum=0.9, nesterov=True)
+        opt = Adam(learning_rate=lr)
+        model.compile(optimizer=opt, loss=losses, metrics=metrics, loss_weights=weights,
+                    steps_per_execution=32, jit_compile=True)
 
     target = '+'.join(list(target))
-    if use_triplet_loss:
-        target += 'triplet'
-    
     model_dir = Path(f'trained_models/{model.name}_dataset-{dataset}_target-{target}')       
     model_dir.mkdir(parents=True, exist_ok=True)
-
-    # Save untrained model as well!
-    #model.save(f"{model_dir}/epoch-{'0'.zfill(3)}")
 
     callbacks = []
     if stop_on_val_loss is not None:
         callbacks.append(EarlyStoppingOnLoss(value=stop_on_val_loss, verbose=0))
         epochs = 100
 
+    callbacks.append(ReduceLROnPlateau('loss', patience=5))
+    callbacks.append(TensorBoard(log_dir='./tf_logs', update_freq='batch'))
+    
     # Train and save both model and history (loss/accuracy across epochs)
     with tf.device(f'/gpu:{gpu_id}'):
         history = model.fit(train, validation_data=val, epochs=epochs, callbacks=callbacks)
 
     epochs = len(history.history['loss'])  # check actual number of epochs!
-    model.save(f"{model_dir}/epoch-{epochs:03d}")
+    model.save(f"{model_dir}/xepoch-{epochs:03d}")
     pd.DataFrame(history.history).to_csv(f'{model_dir}/history.csv', index=False)
 
 
 if __name__ == '__main__':
+    start = time.time()
     main()
+    duration = time.time() - start
+    print(f"Training took {duration} seconds!")

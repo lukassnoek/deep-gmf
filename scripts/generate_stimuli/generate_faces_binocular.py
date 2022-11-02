@@ -77,21 +77,6 @@ def main(out_dir, n_id, n_var, add_background, image_resolution, image_format, s
     # Setup openGL context + camera
     ctx = Ctx(hidden=True)
 
-    # To init a camera, a model should exist, so using base_nf
-    base_nf.attach(ctx)
-    ctx._camera[0] = Camera(
-        ctx.win, image_resolution, renderscale,
-        target=[-11.5644, -13.0381, 0],
-        eye = [-11.5644, -13.0381, camera_distance],
-        up = [0, 1, 0],
-        FOV = 50,
-        near = 100.,
-        far = 1000.
-    )
-    ctx.assign_camera(0)
-
-    base_nf.detach()  # not necessary anymore
-
     # Set custom lights with only a single source
     ctx.set_lights(Path(light_source))
 
@@ -144,97 +129,110 @@ def main(out_dir, n_id, n_var, add_background, image_resolution, image_format, s
             lights_pos[2] = camera_distance
             ctx.transform_lights(xl, yl, 0, lights_pos, replace=True)
             
-            # Render + alpha blend img & background
-            img = ctx.render(dest='image')
-            
-            if add_background:
-                # Cast to float for normalization
-                img_arr = np.array(img).astype(np.float32)
-                img_rgb, img_a = img_arr[..., :3], img_arr[..., 3, None]
-                img_a /= 255.  # alpha should be in 0-1 range!
+            for eye in ['left', 'right']:
+                offset = 32 if eye == 'right' else -32
 
-                # Generate background ...
-                bg = phase_scramble_image(
-                    img_rgb.copy(), out_path=None, grayscale=False, shuffle_phase=False,
-                    smooth=None, is_image=False
+                ctx._camera[0] = Camera(
+                    ctx.win, image_resolution, renderscale,
+                    target=[-11.5644, -13.0381, 0],
+                    eye = [-11.5644 + offset, -13.0381, camera_distance],
+                    up = [0, 1, 0],
+                    FOV = 50,
+                    near = 100.,
+                    far = 1000.
                 )
-                # ... and alpha blend original image and background
-                img_arr = (img_rgb * img_a) + (bg * (1 - img_a))
-                img_arr = img_arr.astype(np.uint8)
-                img = Image.fromarray(img_arr)
-                bg = bg.astype(np.uint8)
-
-            if save_image_separately:
-                # Save to disk as an image; nice for inspection and may be
-                # a little faster to load in Tensorflow compared to hdf5
-                img.save(f_out + f'_image.{image_format}')
-
-            # Save all (other) features as a hdf5 file
-            with h5py.File(f_out + '_features.h5', 'w') as f_out:
+                ctx.assign_camera(0)
+                # Render + alpha blend img & background
+                img = ctx.render(dest='image')
                 
-                # save shape and texture parameters
-                if save_id_params:  
-                    # Note that we're saving the "scaled" coefficients, i.e., the
-                    # coefficients x variance of the coeffients in PCA space
-                    f_out.create_dataset('shape', data=shape_coeff * SV, compression='gzip', compression_opts=9)
-                    f_out.create_dataset('tex', data=tex_coeff * ST, compression='gzip', compression_opts=9)            
+                if add_background:
+                    # Cast to float for normalization
+                    img_arr = np.array(img).astype(np.float32)
+                    img_rgb, img_a = img_arr[..., :3], img_arr[..., 3, None]
+                    img_a /= 255.  # alpha should be in 0-1 range!
 
-                if not save_image_separately:  # save img, too, if not already
-                    f_out.create_dataset('img', data=np.array(img), compression='gzip', compression_opts=9)
+                    # Generate background ...
+                    bg = phase_scramble_image(
+                        img_rgb.copy(), out_path=None, grayscale=False, shuffle_phase=False,
+                        smooth=None, is_image=False
+                    )
+                    # ... and alpha blend original image and background
+                    img_arr = (img_rgb * img_a) + (bg * (1 - img_a))
+                    img_arr = img_arr.astype(np.uint8)
+                    img = Image.fromarray(img_arr)
+                    bg = bg.astype(np.uint8)
 
-                if save_background:  # save custom background
-                    f_out.create_dataset('background', data=bg, compression='gzip', compression_opts=9)
+                if save_image_separately:
+                    # Save to disk as an image; nice for inspection and may be
+                    # a little faster to load in Tensorflow compared to hdf5
+                    img.save(f_out + f'_image{eye}.{image_format}')
 
-                if save_buffers:
-                    buffers = {
-                        'frag_pos': [ctx.fbo['gBuffer'], 'gPosition', [0,1,2]],  # fragment shader position
-                        'world_pos': [ctx.fbo['gBuffer'], 'gWPosition', [0,1,2]],  # world position
-                        'spec_normal': [ctx.fbo['gBuffer'], 'gNormal', [0,1,2]],  # specular normals
-                        'diff_normal': [ctx.fbo['gBuffer'], 'gBlurNormal', [0,1,2]],  # diffuse normals
-                        'albedo': [ctx.fbo['gBuffer'], 'gAlbedoSpec', [0,1,2]],  # texture
-                        'ssao': [ctx.fbo['SSAOblur'], 'ctbuffer', [0]]  # ambient occlusion
-                    }
-
-                    for name, bufflist in buffers.items():
-                        ctx._image_pass(bufflist[0], bufflist[1])
-                        if isinstance(ctx.im, list):
-                            im_ = np.dstack([np.array(im) for i, im in enumerate(ctx.im)
-                                                            if i in bufflist[2]])
-                        else:
-                            im_ = np.array(ctx.im)
-                            
-                        f_out.create_dataset(name, data=im_, compression='gzip', compression_opts=9)                        
-
-                if save_lighting:
-                    for name, opt in lightopts.items():
-                        ctx.programs['LightingShader']['out_type'] = opt
-                        ctx._lighting_pass()
-                        im_ = np.array(ctx.dispatch_draw('image'))
-                        if im_.shape[0] == (image_resolution[0] * renderscale):
-                            # Some lighting data is in upsampled resolution; downsample first!
-                            im_ = imresize(im_, image_resolution, resample=Image.BILINEAR)
-
-                        f_out.create_dataset(name, data=im_, compression='gzip', compression_opts=9)
+                # Save all (other) features as a hdf5 file
+                with h5py.File(f_out + '_features.h5', 'w') as f_out_hdf:
                     
-                    ctx.fbo['draw'].bind()
-                    GFG.GL.glClearColor(0.0,0.0,0.0,0.0)
-                    GFG.GL.glClear(GFG.GL.GL_COLOR_BUFFER_BIT)
+                    # save shape and texture parameters
+                    if save_id_params:  
+                        # Note that we're saving the "scaled" coefficients, i.e., the
+                        # coefficients x variance of the coeffients in PCA space
+                        f_out_hdf.create_dataset('shape', data=shape_coeff * SV, compression='gzip', compression_opts=9)
+                        f_out_hdf.create_dataset('tex', data=tex_coeff * ST, compression='gzip', compression_opts=9)            
 
-                    # now run fowrard pass and return image
-                    ctx._forward_pass()
-                    im_ = np.array(ctx.dispatch_draw('image'))
-                    f_out.create_dataset('glass', data=im_, compression='gzip', compression_opts=9)
+                    if not save_image_separately:  # save img, too, if not already
+                        f_out_hdf.create_dataset('img', data=np.array(img), compression='gzip', compression_opts=9)
 
-                    ctx.programs['LightingShader']['out_type'] = 1
-                    ctx.programs['LightingShader'].update_uniforms()                    
+                    if save_background:  # save custom background
+                        f_out.create_dataset('background', data=bg, compression='gzip', compression_opts=9)
 
-                # Always save other generative parameters (rot, trans, lights, gender, ethn, age, id)
-                for (name, p) in [
-                    ('xr', xr), ('yr', yr), ('zr', zr), ('xt', xt), ('yt', yt), ('zt', zt),
-                    ('xl', xl), ('yl', yl), ('zl', zl), ('gender', gend), ('ethn', ethn), ('age', age),
-                    ('id', id_name)
-                    ]:
-                    f_out.attrs[name] = p
+                    if save_buffers:
+                        buffers = {
+                            'frag_pos': [ctx.fbo['gBuffer'], 'gPosition', [0,1,2]],  # fragment shader position
+                            'world_pos': [ctx.fbo['gBuffer'], 'gWPosition', [0,1,2]],  # world position
+                            'spec_normal': [ctx.fbo['gBuffer'], 'gNormal', [0,1,2]],  # specular normals
+                            'diff_normal': [ctx.fbo['gBuffer'], 'gBlurNormal', [0,1,2]],  # diffuse normals
+                            'albedo': [ctx.fbo['gBuffer'], 'gAlbedoSpec', [0,1,2]],  # texture
+                            'ssao': [ctx.fbo['SSAOblur'], 'ctbuffer', [0]]  # ambient occlusion
+                        }
+
+                        for name, bufflist in buffers.items():
+                            ctx._image_pass(bufflist[0], bufflist[1])
+                            if isinstance(ctx.im, list):
+                                im_ = np.dstack([np.array(im) for i, im in enumerate(ctx.im)
+                                                                if i in bufflist[2]])
+                            else:
+                                im_ = np.array(ctx.im)
+                                
+                            f_out_hdf.create_dataset(name, data=im_, compression='gzip', compression_opts=9)                        
+
+                    if save_lighting:
+                        for name, opt in lightopts.items():
+                            ctx.programs['LightingShader']['out_type'] = opt
+                            ctx._lighting_pass()
+                            im_ = np.array(ctx.dispatch_draw('image'))
+                            if im_.shape[0] == (image_resolution[0] * renderscale):
+                                # Some lighting data is in upsampled resolution; downsample first!
+                                im_ = imresize(im_, image_resolution, resample=Image.BILINEAR)
+
+                            f_out_hdf.create_dataset(name, data=im_, compression='gzip', compression_opts=9)
+                        
+                        ctx.fbo['draw'].bind()
+                        GFG.GL.glClearColor(0.0,0.0,0.0,0.0)
+                        GFG.GL.glClear(GFG.GL.GL_COLOR_BUFFER_BIT)
+
+                        # now run fowrard pass and return image
+                        ctx._forward_pass()
+                        im_ = np.array(ctx.dispatch_draw('image'))
+                        f_out_hdf.create_dataset('glass', data=im_, compression='gzip', compression_opts=9)
+
+                        ctx.programs['LightingShader']['out_type'] = 1
+                        ctx.programs['LightingShader'].update_uniforms()                    
+
+                    # Always save other generative parameters (rot, trans, lights, gender, ethn, age, id)
+                    for (name, p) in [
+                        ('xr', xr), ('yr', yr), ('zr', zr), ('xt', xt), ('yt', yt), ('zt', zt),
+                        ('xl', xl), ('yl', yl), ('zl', zl), ('gender', gend), ('ethn', ethn), ('age', age),
+                        ('id', id_name)
+                        ]:
+                        f_out_hdf.attrs[name] = p
 
         nf.detach()
 

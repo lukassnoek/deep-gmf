@@ -3,17 +3,17 @@ import tensorflow as tf
 from tensorflow.keras.layers import Layer
 
 
-class ArcMarginPenaltyLogists(tf.keras.layers.Layer):
-    """ArcMarginPenaltyLogists"""
+class ArcMarginPenaltyLogits(tf.keras.layers.Layer):
+    """ArcMarginPenaltyLogits"""
     def __init__(self, num_classes, margin=0.5, logist_scale=64, **kwargs):
-        super(ArcMarginPenaltyLogists, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.num_classes = num_classes
         self.margin = margin
         self.logist_scale = logist_scale
 
     def build(self, input_shape):
-        self.w = self.add_variable(
-            "weights", shape=[int(input_shape[-1]), self.num_classes])
+        self.w = self.add_weight(
+            "weights", shape=[input_shape[-1], self.num_classes])
         self.cos_m = tf.identity(math.cos(self.margin), name='cos_m')
         self.sin_m = tf.identity(math.sin(self.margin), name='sin_m')
         self.th = tf.identity(math.cos(math.pi - self.margin), name='th')
@@ -34,10 +34,9 @@ class ArcMarginPenaltyLogists(tf.keras.layers.Layer):
         mask = tf.one_hot(tf.cast(labels, tf.int32), depth=self.num_classes,
                           name='one_hot_mask')
 
-        logists = tf.where(mask == 1., cos_mt, cos_t)
-        logists = tf.multiply(logists, self.logist_scale, 'arcface_logist')
-
-        return logists
+        logits = tf.where(mask == 1., cos_mt, cos_t)
+        logits = tf.multiply(logits, self.logist_scale, 'arcface_logits')
+        return logits
 
 
 class PCATransform(Layer):

@@ -10,7 +10,7 @@ import pandas as pd
 import tensorflow as tf
 from tqdm import tqdm
 from pathlib import Path
-from sklearn.decomposition import IncrementalPCA
+#from sklearn.decomposition import IncrementalPCA
 
 from tensorflow.keras import Model
 from tensorflow.keras.models import load_model
@@ -28,22 +28,23 @@ from src.models.embedding import TFIncrementalPCA
 @click.option('--batch-size', default=512)
 @click.option('--gpu-id', default=1)
 @click.option('--cpu', is_flag=True)
-def main(model_path, n_comp, n_batches, batch_size, gpu_id, cpu):
+@click.option('--binocular', is_flag=True)
+def main(model_path, n_comp, n_batches, batch_size, gpu_id, cpu, binocular):
     """ Learn a (linear PCA) compression of the feature representations
     in each layer of a given model (or, at least, the input/conv/globalpool layers.)
     """
-    
+
     # Load dataset info to pass to `create_dataset`
     model_name = str(Path(model_path).parent.name)
-    dataset = model_name.split('dataset-')[1].split('_')[0]
+    dataset = model_name.split('dataset-')[1].split('_target')[0]
     info = pd.read_csv(f'/analyse/Project0257/lukas/data/{dataset}.csv')
-    train_data, _ = create_dataset(info, Y_col='shape', batch_size=batch_size)
+    train_data, _ = create_dataset(info, Y_col='id', batch_size=batch_size, binocular=binocular)
 
     # Load model
     model = load_model(model_path, custom_objects={'AngleLoss': AngleLoss})
 
     # Analyze only relevant layers, to speed up compression
-    layers2analyze = ['conv', 'globalpool', 'input']    
+    layers2analyze = ['input', 'conv', 'globalpool', 'id']    
     layers = [l for l in model.layers if 'shortcut' not in l.name]
     layers = [l for l in layers if any([l2a in l.name for l2a in layers2analyze])]
 
@@ -52,7 +53,8 @@ def main(model_path, n_comp, n_batches, batch_size, gpu_id, cpu):
     f_out.attrs['n_comp'] = n_comp   
     f_out.attrs['n_batches'] = n_batches
 
-    for layer in tqdm(layers):
+    pbar = tqdm(layers)
+    for layer in pbar:
         # Create separate group for every layer
         grp = f_out.create_group(layer.name)
         extractor = Model(inputs=model.inputs, outputs=[layer.output])
@@ -63,24 +65,33 @@ def main(model_path, n_comp, n_batches, batch_size, gpu_id, cpu):
             pca = TFIncrementalPCA(n_components=n_comp)
 
         for i, (X, _) in enumerate(train_data):
+            pbar.set_description(f"{layer.name}, {i+1}/{n_batches}")
+            
             # Only process `n_batches`
             if i == n_batches:
                 break
 
             # Extract activations (a_N, N = neural)
             with tf.device(f'/gpu:{gpu_id}'):
-                a_N = extractor.predict_step(X)
+                a_N = extractor.predict(X)
                 a_N = tf.reshape(a_N, (batch_size, -1))            
+                
+                if a_N.dtype == tf.float16:
+                    a_N = tf.cast(a_N, tf.float32)
+
                 pca.partial_fit(a_N)
 
         if not cpu:
             pca.mean_ = pca.mean_.numpy()
             pca.components_ = pca.components_.numpy()
 
+        exp_var = pca.explained_variance_ratio_.numpy().sum()
+        print(f"Layer: {layer.name}, explained var.: {exp_var:.3f}")
+
         # Save PCA mean and component parameters (and expl. variance)       
         grp.create_dataset('mu', data=pca.mean_)
         grp.create_dataset('W', data=pca.components_)
-        grp.attrs['explained_variance'] = pca.explained_variance_ratio_.numpy().sum()
+        grp.attrs['explained_variance'] = exp_var
 
     f_out.close()
 

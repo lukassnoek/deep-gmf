@@ -1,6 +1,4 @@
-from sklearn.model_selection import ParameterSampler
 import tensorflow as tf
-#from tensorflow.keras.metrics import Metric
 
 
 def RSquared(reduce='median', center=True):

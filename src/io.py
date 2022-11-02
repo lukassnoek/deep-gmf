@@ -15,29 +15,33 @@ CAT_COLS = ['id', 'ethn', 'gender']
 CONT_COLS = ['age', 'xr', 'yr', 'zr', 'xt', 'yt', 'zt', 'xl', 'yl', 'zl']
 
 
-def create_casia_webface_dataset():
-    pass
-        
-
-
-def create_test_dataset(df_test, batch_size=256, target_size=(224, 224, 3),
-                        n_shape=None, n_tex=None, n_cpu=20):
+def create_test_dataset(df_test, batch_size=256, target_size=(112, 112, 3),
+                        n_shape=None, n_tex=None, n_cpu=20, binocular=False):
     
     # Note to self: no reason to shuffle dataset for testing!
     df_dataset = tf.data.Dataset.from_tensor_slices(dict(df_test))
-    dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size),
-                             num_parallel_calls=n_cpu)
+    if binocular:
+        l_dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size, 'image_path_left'),
+                                 num_parallel_calls=n_cpu)
+        #r_dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size, 'image_path_right'),
+        #                         num_parallel_calls=n_cpu)
+        #dataset = tf.data.Dataset.zip((l_dataset, r_dataset))
+        dataset = l_dataset
+    else:
+        dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size),
+                                 num_parallel_calls=n_cpu)
     
     n_shape = 0 if n_shape is None else n_shape
     n_tex = 0 if n_tex is None else n_tex
     
     shape_tex_bg = []
-    for feat in ('shape', 'tex', 'background'):
+    for feat in ('shape', 'tex'):#, 'background'):
         # by default, we want all shape/tex coefficients
+        key = 'image_path' if not binocular else 'image_path_left'
         ds = df_dataset.map(
             lambda row: tf.py_function(
                 func=_load_hdf_features, inp=[
-                    row['image_path'], feat, n_shape, n_tex],
+                    row[key], feat, n_shape, n_tex],
                 Tout=tf.float32,
             ),
             num_parallel_calls=n_cpu
@@ -55,10 +59,10 @@ def create_test_dataset(df_test, batch_size=256, target_size=(224, 224, 3),
     return dataset
 
 
-def create_dataset(df, Y_col='id', batch_size=256,
+def create_dataset(df, Y_col='id', batch_size=256, arcface=False,
                    n_id_train=None, n_id_val=None, n_var_per_id=None, n_shape=None,
-                   n_tex=None, query=None, target_size=(224, 224, 3), shuffle=True,
-                   cache=False, use_triplet_loss=False, n_cpu=10):
+                   n_tex=None, query=None, target_size=(112, 112, 3), shuffle=True,
+                   cache=False, n_cpu=10, binocular=False):
 
     # Never train a model on test-set stimuli
     df = df.query("split != 'testing'")
@@ -71,23 +75,23 @@ def create_dataset(df, Y_col='id', batch_size=256,
         # If we're classifying face ID, the subsample of
         # face IDs should be the same in the train and val set,
         # but only when not using triplet loss
-        if n_id_train is not None and not use_triplet_loss:
+        if n_id_train is not None:
             n_id_val = n_id_train
         else:
             n_id = df['id'].nunique()
-            if n_id > 512 and not use_triplet_loss:
+            if n_id > 512:
                 # Probably not a good idea to train a network to classify
                 # a shit ton of IDs
                 print(f"WARNING: there are a lot of IDs {n_id}; going to be very slow!")
 
-        if n_id_val is not None and not use_triplet_loss:
+        if n_id_val is not None:
             n_id_train = n_id_val
 
     if query is not None:
         # Filter dataset with query string
         df = df.query(query)
     
-    if 'id' in Y_col and not use_triplet_loss:
+    if 'id' in Y_col:
         # If 'id' is one of the targets, we cannot stratify according
         # to 'id', because that will lead to unique 'id' values in the val set!
         if n_id_train is not None:
@@ -169,6 +173,7 @@ def create_dataset(df, Y_col='id', batch_size=256,
                 df_comb = df_comb.astype({col: str})
                 # StringLookup converts strings to integers and then
                 # (with output_mode='one_hot') to a dummy representation
+                
                 slu = StringLookup(output_mode='one_hot', num_oov_indices=0)
                 slu.adapt(df_comb[col].unique())
                 cat_encoders[col] = slu
@@ -181,14 +186,26 @@ def create_dataset(df, Y_col='id', batch_size=256,
     for ds_name, df_ in [('training', df_train), ('validation', df_val)]:
         # Note to self: Dataset.list_files automatically sorts the input,
         # undoing the df.sample randomization! So use from_tensor_slices instead
+        for col in list(Y_col):
+            if col in CAT_COLS:
+                df_[col] = df_[col].apply(str)
+
         df_dataset = tf.data.Dataset.from_tensor_slices(dict(df_))
         #if shuffle and ds_name == 'training':
         #    df_dataset = df_dataset.shuffle(buffer_size=df_.shape[0], reshuffle_each_iteration=True)
     
         # Load img + resize + normalize (/255)
         # Do not overwrite files_dataset, because we need it later
-        X_dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size),
-                                   num_parallel_calls=n_cpu)
+        if binocular:
+            Xl_dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size, 'image_path_left'),
+                                    num_parallel_calls=n_cpu)
+            #Xr_dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size, 'image_path_right'),
+            #                        num_parallel_calls=n_cpu)
+            #X_dataset = tf.data.Dataset.zip((Xl_dataset, Xr_dataset))
+            X_dataset = Xl_dataset
+        else:
+            X_dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size, 'image_path'),
+                                    num_parallel_calls=n_cpu)
 
         # Extract and preprocess output (Y) vars
         ds_tmp = []
@@ -214,9 +231,6 @@ def create_dataset(df, Y_col='id', batch_size=256,
                 # to one-hot encode string values
                 ds = df_dataset.map(lambda x: cat_encoders[col](x[col]),
                                     num_parallel_calls=n_cpu)
-                
-                if col == 'id' and use_triplet_loss:
-                    ds = ds.map(lambda x: tf.math.argmax(x))
 
             elif col in CONT_COLS:
                 # Cast to float32 (necessary for e.g. rotation params)
@@ -231,9 +245,13 @@ def create_dataset(df, Y_col='id', batch_size=256,
             # If only one output, it should not be nested!
             ds_tmp = ds_tmp[0]
 
+        if arcface:
+            ds_tmp_ = ds_tmp.map(lambda x: tf.argmax(x))
+            X_dataset = tf.data.Dataset.zip((X_dataset, ds_tmp_))
+
         # Merge inputs (X, Z) with outputs (Y)
         dataset = tf.data.Dataset.zip((X_dataset, ds_tmp))
-        
+
         # Get rid of tf stdout vomit
         options = tf.data.Options()
         options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF
@@ -242,8 +260,8 @@ def create_dataset(df, Y_col='id', batch_size=256,
         if cache:
             dataset = dataset.cache()
 
-        if ds_name == 'training':
-            dataset = dataset.shuffle(2**14, reshuffle_each_iteration=True)
+        #if ds_name == 'training':
+        #    dataset = dataset.shuffle(2**14, reshuffle_each_iteration=True)
 
         # Optimization tricks (drop_remainder is necessary for multi-GPU
         # training, don't know why)
@@ -259,12 +277,16 @@ def create_dataset(df, Y_col='id', batch_size=256,
     return ds_train, ds_val
 
 
-def _preprocess_img(row, target_size):
+def _preprocess_img(row, target_size, key='image_path'):
     """ Image-to-tensor (plus some preprocessing).
     To be used in dataset.map(). """
-    img = tf.io.read_file(row['image_path'])
-    img = tf.io.decode_png(img, channels=3)
-    img = tf.image.resize(img, [*target_size[:2]])
+    img = tf.io.read_file(row[key])
+    img = tf.io.decode_jpeg(img, channels=3)
+    if tf.reduce_any(tf.size(img) != target_size[:2]):
+        img = tf.image.resize(img, [*target_size[:2]])
+    else:
+        img = tf.cast(img, tf.float32)
+
     img = img / 255.  # rescale
     return img
 
@@ -274,7 +296,12 @@ def _load_hdf_features(f, feature, n_shape, n_tex, bg_size=(56, 56)):
     a .map method call from a Tensorflow Dataset object. """
     f = f.numpy().decode('utf-8')
     feature = feature.numpy().decode('utf-8')
-    with h5py.File(f.replace('image.png', 'features.h5'), 'r') as f_in:
+    if 'left' in f:
+        to_replace = 'imageleft.jpg'
+    else:
+        to_replace = 'image.jpg'
+
+    with h5py.File(f.replace(to_replace, 'features.h5'), 'r') as f_in:
         data = f_in[feature][:]
 
     if feature == 'tex' and n_tex != 0:

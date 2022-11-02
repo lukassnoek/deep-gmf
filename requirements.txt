@@ -1,8 +1,8 @@
-tensorflow==2.8.0  # also installs numpy
+tensorflow==2.10.0  # also installs numpy
 tensorflow-addons
 pandas
 click
 matplotlib
 seaborn
 tqdm
-cupy-cuda112
+Pillow

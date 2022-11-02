@@ -3,7 +3,7 @@
 
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Flatten, Dense, Input
-from tensorflow.keras.layers import Conv2D, MaxPooling2D, Resizing
+from tensorflow.keras.layers import Conv2D, MaxPooling2D
 
 
 def ConvBlock(filters, n_conv=2, kernel_size=3, block=1, layer=1):

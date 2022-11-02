@@ -1,6 +1,5 @@
 import click
 import h5py
-import numpy as np
 import pandas as pd
 from random import sample
 from tqdm import tqdm
@@ -14,7 +13,8 @@ from collections import defaultdict
 @click.option('--n-id-val', type=click.INT, default=24)
 @click.option('--n-id-test', type=click.INT, default=24)
 @click.option('--n-per-id', type=click.INT, default=16)
-def main(dataset_name, n_id_train, n_id_val, n_id_test, n_per_id):
+@click.option('--binocular', is_flag=True, default=False)
+def main(dataset_name, n_id_train, n_id_val, n_id_test, n_per_id, binocular):
     """ Aggregates all ID/stimulus features into a single dataframe
     and splits the data into three 'splits' (training, validation, testing),
     which contain images from unique face IDs.
@@ -44,18 +44,32 @@ def main(dataset_name, n_id_train, n_id_val, n_id_test, n_per_id):
     In case of 128 IDs (2**7), the split (train/val/test) is 96/16/16;
     In case of 8192 IDs (2**13), the split (train/val/test) is 6144/1024/1024;
     In case of 16384 IDs (2**14), the split (train/val/test) is 12288/2048/2048;
-    in case of 65536 IDs (2**16), the split (train/val/test) is 49152/8192/8192       
+    in case of 65536 IDs (2**16), the split (train/val/test) is 49152/8192/8192
     """
 
     data_dir = Path(f'/analyse/Project0257/lukas/data/{dataset_name}')
-    files = data_dir.glob('**/*_image.jpg')
+
+    if binocular:
+        files = data_dir.glob('**/*_imageleft.jpg')
+    else:
+        files = data_dir.glob('**/*_image.jpg')
     info = defaultdict(list)  # keep track of features
 
     exp_total_files = sum([n_id_train, n_id_val, n_id_test]) * n_per_id    
     for i, f in tqdm(enumerate(files), total=exp_total_files):
         f = str(f)
-        info['image_path'].append(f)
-        feat = f.replace('_image.jpg', '_features.h5')
+
+        if binocular:
+            feat = f.replace('_imageleft.jpg', '_features.h5')
+            info['image_path_left'].append(f)
+            f_right = f.replace('imageleft', 'imageright')
+            if not Path(f_right).is_file():
+                raise ValueError(f"File {f_right} does not exist!")
+            info['image_path_right'].append(f_right)
+        else:
+            feat = f.replace('_image.jpg', '_features.h5')
+            info['image_path'].append(f)
+
         if not Path(feat).is_file():
             raise ValueError(f"File {feat} does not exist!")
 

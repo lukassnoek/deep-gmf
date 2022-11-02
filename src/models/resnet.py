@@ -1,10 +1,10 @@
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Input, Conv2D, Activation
 from tensorflow.keras.layers import BatchNormalization, MaxPooling2D, Add
-from tensorflow.keras.layers import GlobalAveragePooling2D, Flatten, Dense
+from tensorflow.keras.layers import GlobalAveragePooling2D
 
 
-def ResBlock(filters, kernel_sizes=(3, 3), n_blocks=2, bn_momentum=0.01, layer_nr=1, stage=1):
+def ResBlock(filters, kernel_sizes=(3, 3), n_blocks=2, bn_momentum=0.01, layer_nr=1, stage=1, as_model=False, input_shape=None):
     """ Stack of ResNet (V2!) blocks with Conv2D layers and skip connections.
 
     * block = [layer, layer]
@@ -86,10 +86,15 @@ def ResBlock(filters, kernel_sizes=(3, 3), n_blocks=2, bn_momentum=0.01, layer_n
 
         return x
 
-    return apply
+    if as_model:
+        inp = Input(input_shape)
+        x = apply(inp, layer_nr=layer_nr)
+        return Model(inp, x, name='ResBlock')
+    else:
+        return apply
 
 
-def Stem(bn_momentum=0.01):
+def Stem(bn_momentum=0.01, as_model=False, input_shape=None):
     
     def apply(s):
         
@@ -103,10 +108,15 @@ def Stem(bn_momentum=0.01):
 
         return x
     
-    return apply
+    if as_model:
+        inp = Input(input_shape, name='input_stem')
+        x = apply(inp)
+        return Model(inp, x, name='model_stem')
+    else:
+        return apply
 
 
-def ResNet6(input_shape=(224, 224, 3), bn_momentum=0.01):
+def ResNet6(input_shape=(224, 224, 3), bn_momentum=0.01, blocks_only=False):
     """ ResNet6 model.
     
     Parameters
@@ -131,6 +141,9 @@ def ResNet6(input_shape=(224, 224, 3), bn_momentum=0.01):
     # Stage 2
     x = ResBlock((128,), (3,), n_blocks=2, bn_momentum=bn_momentum, layer_nr=4, stage=2)(x)
     
+    if blocks_only:
+        return Model(inputs=s, outputs=x, name='ResNet6')
+
     # Post-activation
     x = BatchNormalization(momentum=bn_momentum, name='layer5_bnorm')(x)
     x = Activation('relu', name='layer5_relu')(x)
@@ -146,7 +159,7 @@ def ResNet6(input_shape=(224, 224, 3), bn_momentum=0.01):
     return model
 
 
-def ResNet10(input_shape=(224, 224, 3), bn_momentum=0.9):
+def ResNet10(input_shape=(224, 224, 3), bn_momentum=0.9, blocks_only=False):
     """ ResNet10 model.
     
     Parameters
@@ -179,6 +192,9 @@ def ResNet10(input_shape=(224, 224, 3), bn_momentum=0.9):
     # Stage 4
     x = ResBlock((512,), (3,), n_blocks=2, bn_momentum=bn_momentum, layer_nr=8, stage=4)(x)
 
+    if blocks_only:
+        return Model(inputs=s, outputs=x, name='ResNet10')
+
     # Post-activation
     x = BatchNormalization(momentum=bn_momentum, name='layer9_bnorm')(x)
     x = Activation('relu', name='layer9_relu')(x)
@@ -193,7 +209,7 @@ def ResNet10(input_shape=(224, 224, 3), bn_momentum=0.9):
     return model
 
 
-def ResNet18(input_shape=(224, 224, 3), bn_momentum=0.01):
+def ResNet18(input_shape=(224, 224, 3), bn_momentum=0.01, blocks_only=False):
     """ ResNet18 model.
     
     Parameters
@@ -226,6 +242,9 @@ def ResNet18(input_shape=(224, 224, 3), bn_momentum=0.01):
     # Stage 4
     x = ResBlock((512, 512), (3, 3), n_blocks=2, bn_momentum=bn_momentum, layer_nr=14, stage=4)(x)
 
+    if blocks_only:
+        return Model(inputs=s, outputs=x, name='ResNet10')
+
     # Post-activation
     x = BatchNormalization(momentum=bn_momentum, name='layer17_bnorm')(x)
     x = Activation('relu', name='layer17_relu')(x)
@@ -241,7 +260,7 @@ def ResNet18(input_shape=(224, 224, 3), bn_momentum=0.01):
     return model
 
 
-def ResNet34(input_shape=(224, 224, 3), bn_momentum=0.01):
+def ResNet34(input_shape=(224, 224, 3), bn_momentum=0.01, blocks_only=False):
     """ ResNet34 model.
     
     Parameters
@@ -274,6 +293,9 @@ def ResNet34(input_shape=(224, 224, 3), bn_momentum=0.01):
     # Stage 4
     x = ResBlock((512, 512), (3, 3), n_blocks=3, bn_momentum=bn_momentum, layer_nr=28, stage=4)(x)
 
+    if blocks_only:
+        return Model(inputs=s, outputs=x, name='ResNet34')
+
     # Post-activation
     x = BatchNormalization(momentum=bn_momentum, name='layer33_bnorm')(x)
     x = Activation('relu', name='layer33_relu')(x)
@@ -289,7 +311,7 @@ def ResNet34(input_shape=(224, 224, 3), bn_momentum=0.01):
     return model
     
 
-def ResNet50(input_shape=(224, 224, 3), bn_momentum=0.01):
+def ResNet50(input_shape=(224, 224, 3), bn_momentum=0.01, blocks_only=False):
     """ ResNet50 model.
     
     Parameters
@@ -322,6 +344,9 @@ def ResNet50(input_shape=(224, 224, 3), bn_momentum=0.01):
     # Stage 4
     x = ResBlock((512, 512, 2048), (1, 3, 1), n_blocks=3, bn_momentum=bn_momentum, layer_nr=41, stage=4)(x)
 
+    if blocks_only:
+        return Model(inputs=s, outputs=x, name='ResNet50')
+
     # Post-activation
     x = BatchNormalization(momentum=bn_momentum, name='layer49_bnorm')(x)
     x = Activation('relu', name='layer49_relu')(x)
@@ -337,7 +362,7 @@ def ResNet50(input_shape=(224, 224, 3), bn_momentum=0.01):
     return model
 
 
-def ResNet101(input_shape=(224, 224, 3), bn_momentum=0.01):
+def ResNet101(input_shape=(224, 224, 3), bn_momentum=0.01, blocks_only=False):
     """ ResNet101 model.
     
     Parameters
@@ -370,6 +395,9 @@ def ResNet101(input_shape=(224, 224, 3), bn_momentum=0.01):
     # Stage 4
     x = ResBlock((512, 512, 2048), (1, 3, 1), n_blocks=3, bn_momentum=bn_momentum, layer_nr=92, stage=4)(x)
 
+    if blocks_only:
+        return Model(inputs=s, outputs=x, name='ResNet101')
+
     # Post-activation
     x = BatchNormalization(momentum=bn_momentum, name='layer100_bnorm')(x)
     x = Activation('relu', name='layer100_relu')(x)
@@ -388,7 +416,7 @@ def ResNet101(input_shape=(224, 224, 3), bn_momentum=0.01):
 if __name__ == '__main__':
 
     # Initialize and compile model
-    model = ResNet50()
+    model = ResNet6(input_shape=(112, 112, 3))
     model.compile(optimizer='adam', loss='categorical_crossentropy', metrics='accuracy')
     print(model.summary())
     
