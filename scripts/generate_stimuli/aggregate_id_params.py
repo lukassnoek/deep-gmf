@@ -13,8 +13,7 @@ from collections import defaultdict
 @click.option('--n-id-val', type=click.INT, default=24)
 @click.option('--n-id-test', type=click.INT, default=24)
 @click.option('--n-per-id', type=click.INT, default=16)
-@click.option('--binocular', is_flag=True, default=False)
-def main(dataset_name, n_id_train, n_id_val, n_id_test, n_per_id, binocular):
+def main(dataset_name, n_id_train, n_id_val, n_id_test, n_per_id):
     """ Aggregates all ID/stimulus features into a single dataframe
     and splits the data into three 'splits' (training, validation, testing),
     which contain images from unique face IDs.
@@ -38,63 +37,67 @@ def main(dataset_name, n_id_train, n_id_val, n_id_test, n_per_id, binocular):
     ValueError
         If the total number of unique face IDs is not the same as
         the sum of the desired train, val, and test IDs
-        
-    Notes
-    -----
-    In case of 128 IDs (2**7), the split (train/val/test) is 96/16/16;
-    In case of 8192 IDs (2**13), the split (train/val/test) is 6144/1024/1024;
-    In case of 16384 IDs (2**14), the split (train/val/test) is 12288/2048/2048;
-    in case of 65536 IDs (2**16), the split (train/val/test) is 49152/8192/8192
     """
 
     data_dir = Path(f'/analyse/Project0257/lukas/data/{dataset_name}')
 
-    if binocular:
-        files = data_dir.glob('**/*_imageleft.jpg')
-    else:
-        files = data_dir.glob('**/*_image.jpg')
+    dirs = sorted(list(data_dir.glob('id-*')))
     info = defaultdict(list)  # keep track of features
 
     exp_total_files = sum([n_id_train, n_id_val, n_id_test]) * n_per_id    
-    for i, f in tqdm(enumerate(files), total=exp_total_files):
-        f = str(f)
+    i = 0
+    for d in tqdm(dirs):
 
-        if binocular:
-            feat = f.replace('_imageleft.jpg', '_features.h5')
-            info['image_path_left'].append(f)
-            f_right = f.replace('imageleft', 'imageright')
-            if not Path(f_right).is_file():
-                raise ValueError(f"File {f_right} does not exist!")
-            info['image_path_right'].append(f_right)
-        else:
-            feat = f.replace('_image.jpg', '_features.h5')
-            info['image_path'].append(f)
+        files = sorted(list(d.glob('*_image.jpg')))
+        if len(files) != n_per_id:
+            raise ValueError(f"Number of files in {d} is not {n_per_id}!")
 
-        if not Path(feat).is_file():
-            raise ValueError(f"File {feat} does not exist!")
+        id = d.stem.split('_')[0].split('-')[1]
+        if id in info['id']:
+            raise ValueError(f"ID {id} already exists in dataframe!")
 
-        info['feature_path'].append(feat)
+        for f in files:
+            f = str(f)
         
-        with h5py.File(feat, mode='r') as f_in:
-
-            # Store all single value features as attributes
-            for p in ('xr', 'yr', 'zr', 'xt', 'yt', 'zt', 'xl', 'yl', 'zl',
-                      'gender', 'ethn', 'age', 'id'):
+            for ext in ['', 'left', 'right']:
+                f_ = f.replace('.jpg', f'{ext}.jpg')
+                if not Path(f_).is_file():
+                    raise ValueError(f'{f_} does not exist!')
                 
-                if p not in f_in.attrs.keys():
-                    print(f"WARNING: attribute {p} does not exist in {feat}!")
-                    to_add = 0
-                else:
-                    to_add = f_in.attrs[p]
-
-                info[p].append(to_add)
+                if ext:
+                    ext = f'_{ext}'
                 
+                info[f'image_path{ext}'].append(f)
+
+            feat = f.replace('_image.jpg', '_features.h5')
+            info['feature_path'].append(feat)
+            
+            with h5py.File(feat, mode='r') as f_in:
+                
+                if id != f_in.attrs['id']:
+                    print(f"WARNING: ID in dirname ({id}) does not match ID in {feat} ({f_in.attrs['id']})!")
+
+                # Store all single value features as attributes
+                for p in ('xr', 'yr', 'zr', 'xt', 'yt', 'zt', 'xl', 'yl', 'zl', 'emo',
+                        'gender', 'ethn', 'age', 'bg', 'id'):
+                    
+                    if p not in f_in.attrs.keys():
+                        print(f"WARNING: attribute {p} does not exist in {feat}!")
+                        to_add = 0
+                    else:
+                        to_add = f_in.attrs[p]
+
+                    info[p].append(to_add)
+            
+            i += 1
+
         # Break if we want a subset of all IDs (for quick testing)
-        if i > ((n_id_train + n_id_val + n_id_test) * n_per_id - 2):
+        if i > (exp_total_files - 2):
             break
 
     df = pd.DataFrame.from_dict(info)
-    df = df.sort_values(by=['id', 'gender', 'ethn', 'age', 'xr', 'yr', 'zr', 'xt', 'yt', 'zt', 'xl', 'yl', 'zl'], axis=0)
+    df = df.sort_values(by=['id', 'gender', 'ethn', 'bg', 'age', 'emo', 'xr', 'yr', 
+                            'zr', 'xt', 'yt', 'zt', 'xl', 'yl', 'zl'], axis=0)
 
     # Splits should sum to total number of face IDs
     n_ids = df['id'].nunique()    
@@ -110,8 +113,9 @@ def main(dataset_name, n_id_train, n_id_val, n_id_test, n_per_id, binocular):
         all_ids = [id_ for id_ in all_ids if id_ not in these_ids]
 
     assert(not all_ids)  # should be empty!
-    df.to_csv(str(data_dir) + '.csv', index=False)
-    
-    
+    f_out = str(data_dir) + '.csv'
+    df.to_csv(f_out, index=False)
+
+
 if __name__ == '__main__':
     main()

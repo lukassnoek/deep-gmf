@@ -11,7 +11,7 @@ from tensorflow.keras.layers import StringLookup
 DATA_PATH = Path('/analyse/Project0257/lukas/data')
 
 # CATegorical variables & CONTinuous variables
-CAT_COLS = ['id', 'ethn', 'gender']
+CAT_COLS = ['id', 'ethn', 'gender', 'bg']
 CONT_COLS = ['age', 'xr', 'yr', 'zr', 'xt', 'yt', 'zt', 'xl', 'yl', 'zl']
 
 
@@ -23,10 +23,10 @@ def create_test_dataset(df_test, batch_size=256, target_size=(112, 112, 3),
     if binocular:
         l_dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size, 'image_path_left'),
                                  num_parallel_calls=n_cpu)
-        #r_dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size, 'image_path_right'),
-        #                         num_parallel_calls=n_cpu)
-        #dataset = tf.data.Dataset.zip((l_dataset, r_dataset))
-        dataset = l_dataset
+        r_dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size, 'image_path_right'),
+                                 num_parallel_calls=n_cpu)
+        dataset = tf.data.Dataset.zip((l_dataset, r_dataset))
+        #dataset = l_dataset
     else:
         dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size),
                                  num_parallel_calls=n_cpu)
@@ -35,7 +35,7 @@ def create_test_dataset(df_test, batch_size=256, target_size=(112, 112, 3),
     n_tex = 0 if n_tex is None else n_tex
     
     shape_tex_bg = []
-    for feat in ('shape', 'tex'):#, 'background'):
+    for feat in ('shape', 'tex'):
         # by default, we want all shape/tex coefficients
         key = 'image_path' if not binocular else 'image_path_left'
         ds = df_dataset.map(
@@ -59,10 +59,10 @@ def create_test_dataset(df_test, batch_size=256, target_size=(112, 112, 3),
     return dataset
 
 
-def create_dataset(df, Y_col='id', batch_size=256, arcface=False,
-                   n_id_train=None, n_id_val=None, n_var_per_id=None, n_shape=None,
-                   n_tex=None, query=None, target_size=(112, 112, 3), shuffle=True,
-                   cache=False, n_cpu=10, binocular=False):
+def create_dataset(df, Y_col='id', batch_size=256, n_id_train=None, n_id_val=None,
+                   n_var_per_id=None, n_shape=None, n_tex=None, query=None,
+                   target_size=(112, 112, 3), shuffle=True, cache=False, n_cpu=10,
+                   binocular=False, jit_compile=False):
 
     # Never train a model on test-set stimuli
     df = df.query("split != 'testing'")
@@ -75,6 +75,7 @@ def create_dataset(df, Y_col='id', batch_size=256, arcface=False,
         # If we're classifying face ID, the subsample of
         # face IDs should be the same in the train and val set,
         # but only when not using triplet loss
+        df = df.query("split == 'training'")
         if n_id_train is not None:
             n_id_val = n_id_train
         else:
@@ -93,7 +94,7 @@ def create_dataset(df, Y_col='id', batch_size=256, arcface=False,
     
     if 'id' in Y_col:
         # If 'id' is one of the targets, we cannot stratify according
-        # to 'id', because that will lead to unique 'id' values in the val set!
+        # to 'id', because that will lead to unique 'id' values in the val set
         if n_id_train is not None:
             # Pick a subset of IDs
             ids = df['id'].unique().tolist()
@@ -158,7 +159,7 @@ def create_dataset(df, Y_col='id', batch_size=256, arcface=False,
         val_batch_size = df_val.shape[0]
     else:
         val_batch_size = batch_size
-    
+   
     # For categorical features (in Y or Z), we need to infer
     # the categories *on the full dataset* (here: `df_comb`),
     # otherwise we risk that the train and val set are encoded
@@ -199,10 +200,10 @@ def create_dataset(df, Y_col='id', batch_size=256, arcface=False,
         if binocular:
             Xl_dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size, 'image_path_left'),
                                     num_parallel_calls=n_cpu)
-            #Xr_dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size, 'image_path_right'),
-            #                        num_parallel_calls=n_cpu)
-            #X_dataset = tf.data.Dataset.zip((Xl_dataset, Xr_dataset))
-            X_dataset = Xl_dataset
+            Xr_dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size, 'image_path_right'),
+                                    num_parallel_calls=n_cpu)
+            X_dataset = tf.data.Dataset.zip((Xl_dataset, Xr_dataset))
+            #X_dataset = Xl_dataset
         else:
             X_dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size, 'image_path'),
                                     num_parallel_calls=n_cpu)
@@ -213,7 +214,7 @@ def create_dataset(df, Y_col='id', batch_size=256, arcface=False,
 
             # shape/tex/3d are loaded from hdf5 file
             # using a custom (non-tf) function
-            if col in ['shape', 'tex', 'background']:
+            if col in ['shape', 'tex']:
                 # Tensorflow cannot handle `None` values, so set to 0
                 n_shape = 0 if n_shape is None else n_shape
                 n_tex = 0 if n_tex is None else n_tex
@@ -244,10 +245,6 @@ def create_dataset(df, Y_col='id', batch_size=256, arcface=False,
         if len(ds_tmp) == 1:
             # If only one output, it should not be nested!
             ds_tmp = ds_tmp[0]
-
-        if arcface:
-            ds_tmp_ = ds_tmp.map(lambda x: tf.argmax(x))
-            X_dataset = tf.data.Dataset.zip((X_dataset, ds_tmp_))
 
         # Merge inputs (X, Z) with outputs (Y)
         dataset = tf.data.Dataset.zip((X_dataset, ds_tmp))
@@ -291,15 +288,12 @@ def _preprocess_img(row, target_size, key='image_path'):
     return img
 
 
-def _load_hdf_features(f, feature, n_shape, n_tex, bg_size=(56, 56)):
+def _load_hdf_features(f, feature, n_shape, n_tex):
     """ Function to load in features from hdf5 file. To be used in
     a .map method call from a Tensorflow Dataset object. """
     f = f.numpy().decode('utf-8')
     feature = feature.numpy().decode('utf-8')
-    if 'left' in f:
-        to_replace = 'imageleft.jpg'
-    else:
-        to_replace = 'image.jpg'
+    to_replace = 'image.jpg'
 
     with h5py.File(f.replace(to_replace, 'features.h5'), 'r') as f_in:
         data = f_in[feature][:]
@@ -310,12 +304,8 @@ def _load_hdf_features(f, feature, n_shape, n_tex, bg_size=(56, 56)):
     if feature == 'shape' and n_shape != 0:
         data = data[:n_shape]
 
-    if feature == 'background':
-        data = Image.fromarray(data).resize(bg_size, Image.ANTIALIAS)
-        data = np.array(data)
-
-    if feature in ('tex', 'background'):
-        data = data.flatten()
+    if feature in ('tex',):
+        data = data.T.flatten()
     
     return data
 

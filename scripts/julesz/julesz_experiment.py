@@ -44,8 +44,6 @@ else:
     dset_target = dset_params.map(lambda x: tf.cast(x['disparity'], tf.float32))
     loss = OrdinalCrossEntropy(),
     metric = [MeanAbsoluteErrorLabels()]
-    #loss = 'mse'
-    #metric = 'cosine_similarity'
 
 dset = Dataset.zip((dset_img, dset_target))
 val = dset.take(N_val)

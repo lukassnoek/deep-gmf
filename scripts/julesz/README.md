@@ -1,0 +1,1 @@
+Some simple experiments with Julesz style random dot stereograms and using DNNs to estimate their disparity.

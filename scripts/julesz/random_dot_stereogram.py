@@ -1,6 +1,5 @@
 import numpy as np
 import tensorflow as tf
-import matplotlib.pyplot as plt
 
 
 def rds(r=50, shape='square', disparity=5, x=0, y=0, img_size=(128, 128)):
@@ -86,27 +85,4 @@ def rds(r=50, shape='square', disparity=5, x=0, y=0, img_size=(128, 128)):
     # Set masked values in img_r with values of img_l
     img_r[mask_disp] = img_l[mask]
 
-    # fig, axes = plt.subplots(ncols=2, nrows=3, constrained_layout=True, figsize=(5, 8))
-    # axes[0, 0].imshow(img_l, cmap='gray')
-    # axes[0, 0].set_title("RDS (left eye)")
-    # axes[0, 1].imshow(img_r, cmap='gray')
-    # axes[0, 1].set_title("RDS (right eye)")
-
-    # axes[1, 0].imshow(mask, cmap='gray')
-    # axes[1, 0].set_title("Shape mask (left eye)")
-    # axes[1, 1].imshow(mask_disp, cmap='gray')
-    # axes[1, 1].set_title("Shape mask (right eye)")
-
-    # axes[2, 0].imshow(img_l - img_r, cmap='gray')
-    # axes[2, 0].set_title("Left img - right img")
-    # axes[2, 1].imshow(mask.astype(int) - mask_disp.astype(int), cmap='gray')
-    # axes[2, 1].set_title("Left mask - right mask")
-
-    # for ax in axes.flatten():
-    #     ax.axis('off')
-    # plt.show()
-
-    return img_l[..., None], img_r[..., None] #mask.astype(int)[..., None], mask_disp.astype(int)[..., None]
-    
-#if __name__ == '__main__':
-#    random_dot_stereogram(shape='circle')
+    return img_l[..., None], img_r[..., None]

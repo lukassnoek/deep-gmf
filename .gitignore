@@ -135,3 +135,4 @@ pretrained_models
 results
 **/.vscode
 tf_logs
+data/backgrounds

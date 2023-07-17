@@ -35,7 +35,7 @@ def add_embedding_head(body, n_embedding=512):
     return model
 
 
-def add_prediction_head(body, targets, n_out):
+def add_prediction_head(body, targets, n_out, layer_nr):
     """ Adds one or more classification/regression heads to 
     an existing model (`body`). 
     
@@ -57,10 +57,14 @@ def add_prediction_head(body, targets, n_out):
         act = None
         if CLASS_OR_REG[target] == 'classification':
             act = 'softmax'
+            name = f'layer{layer_nr}_{act}'
+        else:
+            act = 'linear'
+            name = f'layer{layer_nr}_{act}'
 
-        y.append(Dense(n_o, activation=act, name=target)(x))
+        y.append(Dense(n_o, activation=act, name=name)(x))
 
-    if len(y) == 1:
+    if len(y) == 1:        
         y = y[0]
 
     model = Model(inputs=body.input, outputs=y, name=body.name)    
@@ -81,3 +85,15 @@ class EarlyStoppingOnLoss(Callback):
         
         if current < self.value:
             self.model.stop_training = True
+
+
+def loop_over_layers(model, include=('input', 'conv', 'globalpool', 'softmax', 'linear'), exclude=('shortcut',)):
+
+    for layer in model.layers:
+
+        if isinstance(layer, tf.keras.Model):
+            yield from loop_over_layers(layer)
+        else:
+            if any([inc in layer.name for inc in include]):
+                if not any([exc in layer.name for exc in exclude]):
+                    yield layer
