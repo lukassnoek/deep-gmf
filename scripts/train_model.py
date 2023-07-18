@@ -110,12 +110,10 @@ def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
 
     binocular = model_name in ['StereoResNet10', 'StereoResNet6']
     target_size = (112, 112, 3)  # hard-coded for now
-    train, val = create_dataset(info, Y_col=target, target_size=target_size,
-                                batch_size=batch_size, n_id_train=n_id_train,
-                                n_id_val=n_id_val, n_var_per_id=n_var_per_id,
-                                n_shape=n_shape, n_tex=n_tex, query=query,
-                                n_cpu=n_cpu, binocular=binocular, jit_compile=jit_compile)
-
+    train, val = create_dataset(info, Y_col=target, batch_size=batch_size, n_id_train=n_id_train,
+                                n_id_val=n_id_val, n_var_per_id=n_var_per_id, n_shape=n_shape,
+                                n_tex=n_tex, query=query, n_cpu=n_cpu, binocular=binocular)
+    
     # Infer number of output variables, loss function(s), and metric(s)
     # for each target (may be >1)
     n_out, losses, metrics, weights = (), (), (), ()

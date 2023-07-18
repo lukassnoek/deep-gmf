@@ -49,33 +49,3 @@ def CORnet_Z(input_shape=(224, 224, 3)):
     # Create model (no head; use `src.models.utils.add_head` for this)
     model = Model(inputs=s, outputs=x, name='CORnet-Z')
     return model
-
-
-if __name__ == '__main__':
-
-    import numpy as np
-    from tensorflow.keras.utils import to_categorical
-    from tensorflow.keras.optimizers import SGD
-    from tensorflow.keras.optimizers.schedules import ExponentialDecay
-
-    # ### Create random data
-    # N, C = 1028, 4
-    # batch_size = 256  # original cornet paper
-
-    # # Simulate some data from a linear model, Y = argmax(XW)
-    # X = np.random.normal(0, 1, size=(N, 224, 224, 3)).astype('float32')
-    # W = np.random.normal(0, 0.005, size=(C, 224, 224, 3)).astype('float32')
-    # Z = X.reshape((N, 224 * 224 * 3)) @ W.reshape((224 * 224 * 3, C))
-    # Y = to_categorical(Z.argmax(axis=1))
-
-    ### Create model, compile and fit
-    model = CORnet_Z()
-    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics='accuracy')
-    print(model.summary())
-    # # LR schedule: divide lr by 10 every 10 epochs
-    # decay_steps = int(round((N / batch_size) * 10))
-    # lr_schedule = ExponentialDecay(0.01, decay_steps=decay_steps,
-    #                                decay_rate=0.1, staircase=True)
-    # opt = SGD(learning_rate=lr_schedule, momentum=0.9)
-    # model.compile(optimizer=opt, loss='categorical_crossentropy', metrics='accuracy')
-    # model.fit(X, Y, batch_size=256, epochs=25, validation_split=0.2)

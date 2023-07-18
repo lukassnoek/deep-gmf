@@ -1,89 +1,84 @@
+"""This module contains functions for loading and preprocessing the data for 
+TensorFlow models. The images are assumed to be stored as JPG images and the 
+metadata (ID parameters, shape, texture) as HDF5 files. The choice for HDF5 files is
+probably not a good one, as there's no native TensorFlow function to load HDF5 files,
+so we have to use a Python function, which means the entire pipeline cannot be 
+jit compiled (as in in general slower than when using TF functions)."""
+
 import h5py
 import random
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-from pathlib import Path
-from PIL import Image
 from tensorflow.keras.layers import StringLookup
 
-
-DATA_PATH = Path('/analyse/Project0257/lukas/data')
 
 # CATegorical variables & CONTinuous variables
 CAT_COLS = ['id', 'ethn', 'gender', 'bg']
 CONT_COLS = ['age', 'xr', 'yr', 'zr', 'xt', 'yt', 'zt', 'xl', 'yl', 'zl']
 
 
-def create_test_dataset(df_test, batch_size=256, target_size=(112, 112, 3),
-                        n_shape=None, n_tex=None, n_cpu=20, binocular=False):
-    
-    # Note to self: no reason to shuffle dataset for testing!
-    df_dataset = tf.data.Dataset.from_tensor_slices(dict(df_test))
-    if binocular:
-        l_dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size, 'image_path_left'),
-                                 num_parallel_calls=n_cpu)
-        r_dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size, 'image_path_right'),
-                                 num_parallel_calls=n_cpu)
-        dataset = tf.data.Dataset.zip((l_dataset, r_dataset))
-        #dataset = l_dataset
-    else:
-        dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size),
-                                 num_parallel_calls=n_cpu)
-    
-    n_shape = 0 if n_shape is None else n_shape
-    n_tex = 0 if n_tex is None else n_tex
-    
-    shape_tex_bg = []
-    for feat in ('shape', 'tex'):
-        # by default, we want all shape/tex coefficients
-        key = 'image_path' if not binocular else 'image_path_left'
-        ds = df_dataset.map(
-            lambda row: tf.py_function(
-                func=_load_hdf_features, inp=[
-                    row[key], feat, n_shape, n_tex],
-                Tout=tf.float32,
-            ),
-            num_parallel_calls=n_cpu
-        )
-        shape_tex_bg.append(ds)
-
-    dataset = tf.data.Dataset.zip((dataset, *shape_tex_bg))
-    dataset = dataset.batch(batch_size, drop_remainder=True)
-    dataset = dataset.prefetch(buffer_size=n_cpu)
-    # Get rid of tf stdout vomit
-    #options = tf.data.Options()
-    #options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF
-    #dataset = dataset.with_options(options)
-
-    return dataset
-
 
 def create_dataset(df, Y_col='id', batch_size=256, n_id_train=None, n_id_val=None,
                    n_var_per_id=None, n_shape=None, n_tex=None, query=None,
-                   target_size=(112, 112, 3), shuffle=True, cache=False, n_cpu=10,
-                   binocular=False, jit_compile=False):
+                   shuffle=True, n_cpu=10, binocular=False):
+    """Creates a tf.data.Dataset object from a DataFrame. The DataFrame should contain
+    the paths to the images and the metadata (ID parameters). The function returns
+    a separate tf.dataDataset for the train and validation data.
+    
+    Parameters
+    ----------
+    Y_col : str, list, tuple
+        The column(s) in the DataFrame that should be used as the target variable(s).
+    batch_size : int
+        The batch size; assumed to be the same for the train and validation dataset
+    n_id_train : int
+        The number of face IDs to use for training; if None, all IDs are used
+    n_id_val : int
+        The number of face IDs to use for validation; if None, all IDs are used
+    n_var_per_id : int
+        The number of variations per face ID to use for training; if None, all variations
+        are used
+    n_shape : int
+        The number of shape components to load; if None, all shape components are loaded
+    n_tex : int
+        The number of texture components to load; if None, all texture components are loaded
+    query : str
+        A query string to filter the DataFrame (e.g., "yr > 0", to use only right-rotated
+        images)
+    shuffle : bool
+        Whether to shuffle the dataset before batching
+    n_cpu : int
+        The number of CPU cores to use for loading the data
+    binocular : bool
+        Whether to load binocular images (i.e., left and right eye) or monocular images
+
+    Returns
+    -------
+    ds_train : tf.data.Dataset
+        The batched training dataset
+    ds_val : tf.data.Dataset
+        The batched validation dataset
+
+    Raises
+    ------
+    ValueError
+        If the requested `n_id_train`, `n_id_val`, or `n_var_per_id` is not possible
+    """
 
     # Never train a model on test-set stimuli
     df = df.query("split != 'testing'")
 
     # Make sure Y_col and Z_col are lists by default
-    if isinstance(Y_col, (type(None), str)):
+    if isinstance(Y_col, str):
         Y_col = [Y_col]
 
     if 'id' in Y_col:
-        # If we're classifying face ID, the subsample of
-        # face IDs should be the same in the train and val set,
-        # but only when not using triplet loss
+        # If we're classifying face ID, the subsample of face IDs should be the same in
+        # the train and val set
         df = df.query("split == 'training'")
         if n_id_train is not None:
             n_id_val = n_id_train
-        else:
-            n_id = df['id'].nunique()
-            if n_id > 512:
-                # Probably not a good idea to train a network to classify
-                # a shit ton of IDs
-                print(f"WARNING: there are a lot of IDs {n_id}; going to be very slow!")
 
         if n_id_val is not None:
             n_id_train = n_id_val
@@ -192,20 +187,15 @@ def create_dataset(df, Y_col='id', batch_size=256, n_id_train=None, n_id_val=Non
                 df_[col] = df_[col].apply(str)
 
         df_dataset = tf.data.Dataset.from_tensor_slices(dict(df_))
-        #if shuffle and ds_name == 'training':
-        #    df_dataset = df_dataset.shuffle(buffer_size=df_.shape[0], reshuffle_each_iteration=True)
-    
-        # Load img + resize + normalize (/255)
-        # Do not overwrite files_dataset, because we need it later
+        
         if binocular:
-            Xl_dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size, 'image_path_left'),
+            Xl_dataset = df_dataset.map(lambda row: _preprocess_img(row, 'image_path_left'),
                                     num_parallel_calls=n_cpu)
-            Xr_dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size, 'image_path_right'),
+            Xr_dataset = df_dataset.map(lambda row: _preprocess_img(row, 'image_path_right'),
                                     num_parallel_calls=n_cpu)
             X_dataset = tf.data.Dataset.zip((Xl_dataset, Xr_dataset))
-            #X_dataset = Xl_dataset
         else:
-            X_dataset = df_dataset.map(lambda row: _preprocess_img(row, target_size, 'image_path'),
+            X_dataset = df_dataset.map(lambda row: _preprocess_img(row, 'image_path'),
                                     num_parallel_calls=n_cpu)
 
         # Extract and preprocess output (Y) vars
@@ -254,14 +244,6 @@ def create_dataset(df, Y_col='id', batch_size=256, n_id_train=None, n_id_val=Non
         options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF
         dataset = dataset.with_options(options)
         
-        if cache:
-            dataset = dataset.cache()
-
-        #if ds_name == 'training':
-        #    dataset = dataset.shuffle(2**14, reshuffle_each_iteration=True)
-
-        # Optimization tricks (drop_remainder is necessary for multi-GPU
-        # training, don't know why)
         if ds_name == 'training':
             dataset = dataset.batch(batch_size, drop_remainder=True)
         else:
@@ -274,15 +256,12 @@ def create_dataset(df, Y_col='id', batch_size=256, n_id_train=None, n_id_val=Non
     return ds_train, ds_val
 
 
-def _preprocess_img(row, target_size, key='image_path'):
+def _preprocess_img(row, key='image_path'):
     """ Image-to-tensor (plus some preprocessing).
     To be used in dataset.map(). """
     img = tf.io.read_file(row[key])
     img = tf.io.decode_jpeg(img, channels=3)
-    if tf.reduce_any(tf.size(img) != target_size[:2]):
-        img = tf.image.resize(img, [*target_size[:2]])
-    else:
-        img = tf.cast(img, tf.float32)
+    img = tf.cast(img, tf.float32)
 
     img = img / 255.  # rescale
     return img
@@ -310,14 +289,40 @@ def _load_hdf_features(f, feature, n_shape, n_tex):
     return data
 
 
-if __name__ == '__main__':
+def create_test_dataset(df_test, batch_size=256, n_shape=None, n_tex=None, n_cpu=10,
+                        binocular=False):
     
-    df = pd.read_csv('/analyse/Project0257/lukas/data/gmf_manyIDfewIMG.csv')
-    train = create_dataset(
-        df, X_col='image_path', Y_col=['shape', 'tex'], Z_col=None, batch_size=256,
-        n_id_train=None, n_id_val=None, target_size=(224, 224, 3),
-        shuffle=True, cache=False
-    )
-    #model = create_mock_model(n_inp=1, n_out=1, in_shape=[(224, 224, 3)], n_y=1970)
-    #model.compile(optimizer='adam', loss='mse', metrics='cosine_similarity')
-    #model.fit(train, epochs=5)    
+    # Note to self: no reason to shuffle dataset for testing!
+    df_dataset = tf.data.Dataset.from_tensor_slices(dict(df_test))
+    if binocular:
+        l_dataset = df_dataset.map(lambda row: _preprocess_img(row, 'image_path_left'),
+                                 num_parallel_calls=n_cpu)
+        r_dataset = df_dataset.map(lambda row: _preprocess_img(row, 'image_path_right'),
+                                 num_parallel_calls=n_cpu)
+        dataset = tf.data.Dataset.zip((l_dataset, r_dataset))
+    else:
+        dataset = df_dataset.map(lambda row: _preprocess_img(row),
+                                 num_parallel_calls=n_cpu)
+    
+    n_shape = 0 if n_shape is None else n_shape
+    n_tex = 0 if n_tex is None else n_tex
+    
+    shape_tex_bg = []
+    for feat in ('shape', 'tex'):
+        # by default, we want all shape/tex coefficients
+        key = 'image_path' if not binocular else 'image_path_left'
+        ds = df_dataset.map(
+            lambda row: tf.py_function(
+                func=_load_hdf_features, inp=[
+                    row[key], feat, n_shape, n_tex],
+                Tout=tf.float32,
+            ),
+            num_parallel_calls=n_cpu
+        )
+        shape_tex_bg.append(ds)
+
+    dataset = tf.data.Dataset.zip((dataset, *shape_tex_bg))
+    dataset = dataset.batch(batch_size, drop_remainder=True)
+    dataset = dataset.prefetch(buffer_size=n_cpu)
+    
+    return dataset

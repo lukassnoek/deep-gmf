@@ -1,3 +1,5 @@
+"""Incremental PCA implementation in Tensorflow."""
+
 import tensorflow as tf
 
 

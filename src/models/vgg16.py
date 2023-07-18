@@ -1,5 +1,8 @@
-# Adapted from:
-# https://github.com/rcmalli/keras-vggface/blob/master/keras_vggface/models.py
+"""VGG16 implementation, adapted from
+https://github.com/rcmalli/keras-vggface/blob/master/keras_vggface/models.py
+
+But could never make it train properly on GMF data, so switched to ResNet models.
+"""
 
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Flatten, Dense, Input
@@ -57,10 +60,3 @@ def VGG16(input_shape=(224, 224, 3)):
 
     model = Model(inputs=s, outputs=x, name='VGG16')
     return model
-
-
-if __name__ == '__main__':
-    
-    model = VGG16()
-    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics='accuracy')
-    print(model.summary())

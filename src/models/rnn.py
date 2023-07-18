@@ -5,6 +5,7 @@ Thorat et al. (2021). Category-orthogonal object features guide
 information processing in recurrent neural networks
 trained for object categorization. SVRHM 2021 at Neurips, 2021.
 
+Just a proof of concept, not used in the deep-gmf project (at this moment).
 """
 import numpy as np
 import tensorflow as tf
@@ -173,19 +174,3 @@ def BLTNet(input_shape=(32, 32, 3), batch_size=256, biological_unrolling=True):
     y = io_[-1]  # final prediction is dense output after last timepoint
     model = Model(inputs=inp_, outputs=y, name='BLTNet')
     return model
-
-
-if __name__ == '__main__':
-    batch_size = 512
-    input_shape = (128, 128, 3)
-    model = BLTNet(batch_size=batch_size, input_shape=input_shape, biological_unrolling=False)
-    model.compile(optimizer='adam', loss='mse')
-    #print(model.summary())
-
-    n = batch_size * 10
-    X = np.random.randn(n, *input_shape)
-    y = np.random.randn(n)
-    model = Model(inputs=model.inputs, outputs=model.layers[2].output)
-    model.fit(X, y, batch_size=batch_size, epochs=100)
-    #out = model.predict(X, batch_size=batch_size)
-    #print(out[1][0])

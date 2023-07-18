@@ -86,7 +86,7 @@ def phase_scramble_image(img_path, out_path, grayscale=True, shuffle_phase=True,
 if __name__ == '__main__':
     
     for i in range(10):
-        f_out = f'data/background_{i+1}.png'
+        f_out = f'./data/background_{i+1}.png'
         phase_scramble_image('scripts/test.png', f_out, shuffle_phase=False, grayscale=False)
     
     

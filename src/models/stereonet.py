@@ -1,18 +1,37 @@
-import tensorflow as tf
+"""A model that processes stereo images as inputs, based on the ResNet architecture.
+Still very much work in progress, especially the fusion part. Haven't figured out what
+the best fusion strategy is yet (concatenation, averaging, subtraction, etc.).
+"""
+
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Input, Concatenate, Add, Average, Subtract
 
 from .resnet import ResBlock, Stem, PostActivation
 
 
-def StereoResNet6(input_shape=(112, 112, 3), fuse_after_stage=0, bn_momentum=0.1):
+def StereoResNet6(input_shape=(112, 112, 3), fuse_after_stage=0, bn_momentum=0.9):
+    """StereoNet model architecture that processes stereo images as inputs, based on a
+    ResNet6 (v2) architecture.
+    
+    Parameters
+    ----------
+    input_shape : tuple
+        Shape of the input images, by default (112, 112, 3)
+    fuse_after_stage : int
+        Stage after which to fuse feature maps of left and right inputs, by default 0
+        (i.e., after the stem)
 
+    Returns
+    -------
+    model : tf.keras.Model
+        StereoNet model instance
+    """
    # Input layers (sl = stimulus left eye, sr = stimulus right eye)
     sl = Input(input_shape, name='layer0_input-left')
     sr = Input(input_shape, name='layer0_input-right')
 
     # Stem of ResNet model; downsamples twices (112 -> 56 -> 28)
-    stem = Stem(bn_momentum=bn_momentum)
+    stem = Stem()
     xl = stem(sl)  # 28 x 28 x 64
     xr = stem(sr)  # 28 x 28 x 64
 
@@ -30,9 +49,6 @@ def StereoResNet6(input_shape=(112, 112, 3), fuse_after_stage=0, bn_momentum=0.1
             # Fuse feature maps of left and right inputs
             x = Concatenate(axis=-1, name=f'layer{layer_nr}_concat')([xl, xr])
             n_ch *= 2  # n_channels is temporarily doubled because of concatenation
-            #xm = Average(name=f'layer{layer_nr}_average')([xl, xr])
-            #xs = Subtract(name=f'layer{layer_nr}_subtract')([xl, xr])
-            #x = Add(name=f'layer{layer_nr}_merge')([xm, xs])
 
         if stage > 2:
             # In ResNets, the first stage is not spatially downsampled
@@ -82,7 +98,7 @@ def StereoResNet10(input_shape=(112, 112, 3), fuse_after_stage=1, bn_momentum=0.
     sr = Input(input_shape, name='layer0_input-right')
 
     # Stem of ResNet model; downsamples twices (112 -> 56 -> 28)
-    stem = Stem(bn_momentum=bn_momentum, as_model=True, input=(sr, sl))
+    stem = Stem()
     x = stem([sl, sr])  # 28 x 28 x 64
 
     # n_input channels at stage `t` (and n_filters at stage `t + 1`)

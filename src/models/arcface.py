@@ -7,8 +7,26 @@ from ..layers import ArcMarginPenaltyLogits
 
 
 def ArcFace(input_shape=(112, 112, 3), backbone_name='ResNet10', num_classes=32, n_embed=512, w_decay=5e-4, bn_momentum=0.9):
-    """ ArcFace Model """
+    """ArcFace Model, based on an implementation by Kuan-Yu Huang
+    (https://github.com/peteryuX/arcface-tf2).
+    
+    Parameters
+    ----------
+    input_shape : tuple
+        Shape of the input images, by default (112, 112, 3)
+    backbone_name : str
+        Name of the backbone network, by default 'ResNet10' (from models.resnet)
+    num_classes : int
+        Number of classes, by default 32
+    n_embed : int
+        Dimensionality of the embedding space, by default 512
+    w_decay : float
+        Weight decay, by default 5e-4
+    bn_momentum : float
+        Batch normalization momentum, by default 0.9
+    """
 
+    # Actually uses labels in arcmarginpenaltylogits
     s = Input(input_shape, name='layer0_input')  # s = stimulus
     labels = Input([], name='layer0_labels')
 

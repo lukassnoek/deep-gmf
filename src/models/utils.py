@@ -72,8 +72,8 @@ def add_prediction_head(body, targets, n_out, layer_nr):
 
 
 class EarlyStoppingOnLoss(Callback):
-    """ Stops training when a particular value of `val_loss` has
-    been observed. """    
+    """ Stops training when a particular value of `val_loss` has been observed. I
+    forgot why I implemented this custom version instead of the standard Keras one."""    
     def __init__(self, monitor='val_loss', value=0.01, verbose=0):
         super().__init__()
         self.monitor = monitor
@@ -88,7 +88,25 @@ class EarlyStoppingOnLoss(Callback):
 
 
 def loop_over_layers(model, include=('input', 'conv', 'globalpool', 'softmax', 'linear'), exclude=('shortcut',)):
+    """Generator that loops over all layers in a model and if it encounters a Keras
+    (sub)model, it will recursively loop over the layers in that model as well.
+    
+    Parameters
+    ----------
+    model : tf.keras.Model
+        Model to loop over
+    include : tuple/list
+        Tuple or list of strings with substrings that should be included in the layer names
+        for it to be yielded
+    exclude : tuple/list
+        Tuple or list of strings with substrings that, if part of the layer name, it will
+        not be yielded
 
+    Yields
+    ------
+    layer : tf.keras.layers.Layer
+        Layer that matches the criteria    
+    """
     for layer in model.layers:
 
         if isinstance(layer, tf.keras.Model):

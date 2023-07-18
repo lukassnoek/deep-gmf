@@ -115,16 +115,20 @@ def ResBlock(input_channels, filters, kernel_sizes=(3, 3), n_blocks=2, bn_moment
     return apply
 
 
-def Stem(bn_momentum=0.9):
-    """ResNet "stem" set of layers, to be applied before the ResNet blocks."""
+def Stem():
+    """ResNet "stem" set of layers, to be applied before the ResNet blocks.
+    
+    Returns
+    -------
+    apply : function
+        Function that applies the stem layers
+    """
     
     conv = Conv2D(64, 7, 2, padding='same',  # 64 filters, kernel size 7, stride 2
                    kernel_initializer='he_normal',
                    name='layer1_conv')
-    #bn = BatchNormalization(momentum=bn_momentum, name='layer1_bnorm')
     mp = MaxPooling2D(3, 2, padding='same', name='layer1_pool')
-    #act = Activation('relu', name='layer1_relu')
-
+    
     def apply(s):
         
         # ResNet initial block: Conv block + Maxpool
@@ -136,25 +140,32 @@ def Stem(bn_momentum=0.9):
 
 
 def PostActivation(layer_nr, bn_momentum=0.9):
+    """Post-activation layers, to be applied after the ResNet blocks.
+    
+    Parameters
+    ----------
+    layer_nr : int
+        Current layer number (used in name only)
+    bn_momentum : float
+        Momentum used for batch norm layers
 
+    Returns
+    -------
+    apply : function
+        Function that applies the post-activation layers
+    """
     bn = BatchNormalization(momentum=bn_momentum, name=f'layer{layer_nr}_bnorm')
     act = Activation('relu', name=f'layer{layer_nr}_relu')
-    
-    #conv = Conv2D(256, 7, 1, padding='same', kernel_initializer='he_normal', name=f'layer{layer_nr}_conv')
     gap = GlobalAveragePooling2D(name=f'layer{layer_nr}_globalpool')
-    #mp = MaxPooling2D(3, strides=3, padding='valid', name=f'layer{layer_nr}_pool')
-    #flat = Flatten(name=f'layer{layer_nr}_flatten')
 
     def apply(x):
         x = gap(act(bn(x)))
-        #x = flat(mp(act(bn(x))))
-        #x = flatten(conv(act(bn(x))))
         return x
 
     return apply
 
 
-def ResNet6(input_shape=(112, 112, 3), bn_momentum=0.1):
+def ResNet6(input_shape=(112, 112, 3), bn_momentum=0.9):
     """ ResNet6 model.
     
     Parameters
@@ -168,10 +179,16 @@ def ResNet6(input_shape=(112, 112, 3), bn_momentum=0.1):
     -------
     model : Model
         Keras model
+
+    Notes
+    -----
+    I changed the number of filters in the first two blocks from 64 to 128 and 128 to 256
+    to increase the model's representational power, which helps in training models on
+    data with lots of different face identities (in my experience)
     """    
     
     s = Input(input_shape, name='layer0_input')  # s = stimulus
-    x = Stem(bn_momentum=bn_momentum)(s)
+    x = Stem()(s)
     
     # Stage 1 (Lukas: changed 64 filters to 128)
     x = ResBlock(64, (128,), (3,), n_blocks=2, bn_momentum=bn_momentum, layer_nr=2, stage=1)(x)
@@ -181,8 +198,6 @@ def ResNet6(input_shape=(112, 112, 3), bn_momentum=0.1):
 
     # Post-activation
     x = PostActivation(layer_nr=6)(x)
-
-    #x = Dense(256, activation=None, name='layer6_linear')(x)
     
     # There is no classification top/head by default!
     # Note: ends at layer 5, because dense layer (to be added)
@@ -209,7 +224,7 @@ def ResNet10(input_shape=(112, 112, 3), bn_momentum=0.9):
     """    
     
     s = Input(input_shape, name='layer0_input')  # s = stimulus
-    x = Stem(bn_momentum=bn_momentum)(s)
+    x = Stem()(s)
     
     # Stage 1
     x = ResBlock(64, (64,), (3,), n_blocks=2, bn_momentum=bn_momentum, layer_nr=2, stage=1)(x)
@@ -250,7 +265,7 @@ def ResNet18(input_shape=(224, 224, 3), bn_momentum=0.9):
     """    
     
     s = Input(input_shape, name='layer0_input')  # s = stimulus
-    x = Stem(bn_momentum=bn_momentum)(s)
+    x = Stem(b)(s)
 
     # Stage 1
     x = ResBlock(64, (64, 64), (3, 3), n_blocks=2, bn_momentum=bn_momentum, layer_nr=2, stage=1)(x)
@@ -289,7 +304,7 @@ def ResNet34(input_shape=(112, 112, 3), bn_momentum=0.9):
     """    
     
     s = Input(input_shape, name='layer0_input')  # s = stimulus
-    x = Stem(bn_momentum=bn_momentum)(s)
+    x = Stem()(s)
 
     # Stage 1
     x = ResBlock(64, (64, 64), (3, 3), n_blocks=3, bn_momentum=bn_momentum, layer_nr=2, stage=1)(x)

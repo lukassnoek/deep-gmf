@@ -1,5 +1,8 @@
+"""Utility CLI tool to generate batches of face stimuli from the GMF, with randomly
+sampled ID parameters as well as random variations in pose, expression, lighting, etc."""
+
 import os
-os.environ['DISPLAY'] = ':0.0'
+os.environ['DISPLAY'] = ':0.0'  # necessary for headless rendering
 
 import click
 import random
@@ -16,14 +19,8 @@ from GFG.identity import IDModel
 from GFG.core import Camera
 
 
-lightopts = {
-    'diffuse': 2,
-    'specular': 3,
-    'shadow': 4
-}
-
-ST = np.load('data/idm_St.npy')
-SV = np.load('data/idm_Sv.npy')
+ST = np.load('data/idm_St.npy')  # texture basis standard devs
+SV = np.load('data/idm_Sv.npy')  # shape basis standard devs
 
 
 @click.command('Main face generation API')
@@ -60,11 +57,12 @@ def main(out_dir, n_id, n_var, add_background, image_resolution, image_format, g
     if not out_dir.exists():
         raise ValueError(f"Output directory {str(out_dir)} does not exist!")
 
+    # Identity model (IDM) data
     IDM_PATH = '/analyse/Project0294/GFG_data/model_HDB_linear_v2dense_compact.mat'
     idm = IDModel.load(IDM_PATH)
-    tdet = np.load('/analyse/Project0294/GFG_data/tdet.npy')
-    adata = Adata.load('quick_FACS_blendshapes_v2dense')
-    base_nf = Nf.from_default()
+    tdet = np.load('/analyse/Project0294/GFG_data/tdet.npy')  # high freq texture
+    adata = Adata.load('quick_FACS_blendshapes_v2dense')  # animation data (AUs)
+    base_nf = Nf.from_default()  # nf = neutral face
 
     ### Set up context
     # Setup openGL context + camera
@@ -75,54 +73,79 @@ def main(out_dir, n_id, n_var, add_background, image_resolution, image_format, g
     ctx.set_lights(Path(light_source))
 
     # Emo config
-    emo_df = pd.read_csv('data/emo_config.tsv', sep='\t').set_index('emo')
+    emo_df = pd.read_csv('./data/emo_config.tsv', sep='\t').set_index('emo')
 
+    # Check how many IDs have already been generated
     already_done = len(list(out_dir.glob('id-*')))
+
+    # Loop from already_done to n_id
     for i_id in range(already_done, n_id):
         
-        # ID params
+        # Randomly sample identity parameters (gender, ethnicity, age)
         gend = random.choice(genders.split('+'))
         ethn = random.choice(ethns.split('+'))
-        age = int(round(random.uniform(*ages)))
+        age = int(round(random.uniform(*ages))) 
+        
+        # Randomly sample shape and texture coefficients; note that these are by default
+        # sampled from a standard normal distribution, which almost always results in
+        # physically plausible faces; if you want more "extreme"/caraicatured faces,
+        # sample from a wider distribution (e.g. N(0, 2))
         shape_coeff = np.random.normal(*shape_params, size=len(idm)).astype(np.float16)
         tex_coeff = np.random.normal(*tex_params, size=(idm.nbands, len(idm))).astype(np.float16)
-    
+
+        # Create a new neutral face (nf) with the sampled shape and texture coefficients
+        # and identity parameters
         nf = idm.generate(shape_coeff, tex_coeff, ethnicity=ethn, gender=gend, age=age,
                           basenf=base_nf, tdet=tdet)
         nf.attach(ctx)  # attach to openGL context
 
+        # Create output directory for this identity
         id_name = str(i_id).zfill(len(str(n_id + 1)))
         this_out_dir = out_dir / f'id-{id_name}_gender-{gend}_ethn-{ethn}_age-{age}'
         if not this_out_dir.exists():
             this_out_dir.mkdir(parents=True)
         
-        if n_var == 1:
-            iter_ = range(n_var)
-        else:
-            iter_ = tqdm(range(n_var), desc=f'{i_id}/{n_id}')
-        
+        # For each identity, loop over n_var and randomly sample variation parameters
+        iter_ = tqdm(range(n_var), desc=f'{i_id}/{n_id}')        
         for i_var in iter_:
             
             f_out = str(this_out_dir / str(i_var).zfill(len(str(n_var))))
             
-            xr = int(round(random.uniform(*x_rot)))
-            yr = int(round(random.uniform(*y_rot)))
-            zr = int(round(random.uniform(*z_rot)))
-            xt = int(round(random.uniform(*x_trans)))
-            yt = int(round(random.uniform(*y_trans)))
-            zt = int(round(random.uniform(*z_trans)))
-            xl = int(round(random.uniform(*x_rot_lights)))
-            yl = int(round(random.uniform(*y_rot_lights)))
-            zl = int(round(random.uniform(*z_rot_lights)))
+            xr = int(round(random.uniform(*x_rot)))  # rotation in X
+            yr = int(round(random.uniform(*y_rot)))  # rotation in Y
+            zr = int(round(random.uniform(*z_rot)))  # rotation in Z
+            xt = int(round(random.uniform(*x_trans)))  # translation in X
+            yt = int(round(random.uniform(*y_trans)))  # translation in Y
+            zt = int(round(random.uniform(*z_trans)))  # translation in Z
+            xl = int(round(random.uniform(*x_rot_lights)))  # rotation of light in X
+            yl = int(round(random.uniform(*y_rot_lights)))  # rotation of light in Y
+            zl = int(round(random.uniform(*z_rot_lights)))  # rotation of light in Z
 
+            # Note: probably best to sample only X and Y in light direction
+
+            # Little hack to scale the translation in the X and Y direction with the
+            # distance of the camera to the face (determined by zt), such that the face
+            # stays within the image
             xt = xt * (1 - (zt / 1000))
             yt = yt * (1 - (zt / 1000))
 
-            # Reset to default position and apply actual translation/rotation
+            # We want to rotate around the center of the face, not the center of the
+            # coordinate system, so we need to compute the center of the face (mu) by 
+            # computing the mean of the face vertices
             mu = nf.v[nf.groupvindex[base_nf.groupnames.index('face')]].mean(axis=0)
+            
+            # However, the mean of Z (depth) of the face is not really the center of the
+            # head, so we compute this separately by taking the mean of the Z of the head
+            # vertices
             mu[-1] = nf.v[nf.groupvindex[base_nf.groupnames.index('head')]].mean(axis=0)[-1]
+            
+            # Now, translate face to origin and rotate
             nf.skeleton.transform(x=xr, y=yr, z=zr, t=-mu, replace=True, order='txyz')
+            
+            # Now, translate face back to original position
             nf.skeleton.transform(x=0, y=0, z=0, t=mu, replace=False)
+            
+            # And apply whatever translation parameters were sampled
             nf.skeleton.transform(x=0, y=0, z=0, t=[xt, yt, zt], replace=False)
 
             # Reset light position and rotate
@@ -133,12 +156,17 @@ def main(out_dir, n_id, n_var, add_background, image_resolution, image_format, g
             # Open background according to variation index (so it's counterbalanced across IDs)
             bg = np.array(Image.open(f'./data/background_{i_var+1}.png'))
 
-            # Emotion
+            # Set AUs with sampled emotion
             emo = random.choice(emo_df.index)
             emo_amps = emo_df.loc[emo, :]
             for au, amp in emo_amps.items():
                 adata.bshapes[au] = amp
 
+            # If we want "binocular" stimuli, we render the face three times: once with
+            # a camera in the center (pointed directly at the center of the coordinate space),
+            # one simulating a left eye (offset 32 mm to the left), and one simulating a
+            # right eye (offset 32 mm to the right). If we don't want binocular stimuli,
+            # we only render once with the camera in the center.
             eyes = ['', 'left', 'right'] if binocular else ['']
             for eye in eyes:
 
@@ -159,22 +187,17 @@ def main(out_dir, n_id, n_var, add_background, image_resolution, image_format, g
                     far = 1000.
                 )
                 ctx.assign_camera(0)
-                # Render + alpha blend img & background
+
+                # Finally, actually render the face image
                 img = ctx.render(dest='image')
                 
                 if add_background:
+                    
                     # Cast to float for normalization
                     img_arr = np.array(img).astype(np.float32)
+                    
+                    # Split into RGB and alpha channel
                     img_rgb, img_a = img_arr[..., :3], img_arr[..., 3, None]
-
-                    # for i in range(n_id):
-                    #     bg = phase_scramble_image(
-                    #         img_rgb.copy(), out_path=None, grayscale=False, shuffle_phase=False,
-                    #         smooth=None, is_image=False
-                    #     )
-                    #     Image.fromarray(bg).save(f'data/background_{i+1}.png')
-
-                    # exit()
 
                     img_a /= 255.  # alpha should be in 0-1 range!
 
@@ -182,7 +205,6 @@ def main(out_dir, n_id, n_var, add_background, image_resolution, image_format, g
                     img_arr = (img_rgb * img_a) + (bg * (1 - img_a))
                     img_arr = img_arr.astype(np.uint8)
                     img = Image.fromarray(img_arr)
-                    #bg = bg.astype(np.uint8)
 
                 # Save to disk as an image; nice for inspection and may be
                 # a little faster to load in Tensorflow compared to hdf5
@@ -208,9 +230,11 @@ def main(out_dir, n_id, n_var, add_background, image_resolution, image_format, g
                 if add_background:
                     f_out_hdf.attrs['bg'] = i_var
 
+            # Reset blendshapes to neutral expression (i.e., all AUs have amplitude 0)
             for au, amp in emo_amps.items():
                 adata.bshapes[au] = 0.
 
+        # Detach neutral face from context
         nf.detach()
 
 

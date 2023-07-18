@@ -2,10 +2,9 @@ import tensorflow as tf
 
 
 def RSquared(reduce='median', center=True):
-    """ Computes R-squared with custom reduction (median) and
-    optional centering. Mimics a Keras class, but is actually just a 
-    function that returns a function in order to allow
-    extra parameters.
+    """ Computes R-squared with custom reduction (median) and optional centering.
+    Mimics a Keras class, but is actually just a function that returns a function in
+    order to allow extra parameters.
     
     Parameters
     ----------

@@ -4,7 +4,8 @@ from tensorflow.keras.layers import Layer
 
 
 class ArcMarginPenaltyLogits(tf.keras.layers.Layer):
-    """ArcMarginPenaltyLogits"""
+    """ArcMarginPenaltyLogits for the ArcFace loss. Based on the implementation by
+    Kuan-Yu Huang (https://github.com/peteryuX/arcface-tf2)."""
     def __init__(self, num_classes, margin=0.5, logist_scale=64, **kwargs):
         super().__init__(**kwargs)
         self.num_classes = num_classes
@@ -40,32 +41,27 @@ class ArcMarginPenaltyLogits(tf.keras.layers.Layer):
 
 
 class PCATransform(Layer):
-    """ Linear transform of data into a lower-dimensional
-    space using an (already fitted) PCA decomposition.
+    """ Linear transform of data into a lower-dimensional space using an (already
+    fitted) PCA decomposition.
     
-    If using fixed weights (mu, W), *first* initialize the
-    entire model (a `tf.keras.Model` object) and call the
-    layer's `set_weights` method.
+    If using fixed weights (mu, W), *first* initialize the entire model (a
+    `tf.keras.Model` object) and call the layer's `set_weights` method.
     
     Parameters
     ----------
     n_comp : int
-        Number of PCA components (needed for initialization of
-        weights array)
+        Number of PCA components (needed for initialization of weights array)
     trainable : bool
-        Whether the linear transform parameters (W and mu) are
-        trainable; if not, the weights need to be set using
-        the `set_weights(mu, W)` method
+        Whether the linear transform parameters (W and mu) are trainable; if not, the
+        weights need to be set using the `set_weights(mu, W)` method
     name : str
         Name of layer
     **kwargs : dict
-        Other keyword parameters passed to the Keras Layer
-        init method
+        Other keyword parameters passed to the Keras Layer init method
         
     Examples
     --------
-    Assuming you have a numpy array for `mu` and `W`, you
-    can set them as follows:
+    Assuming you have a numpy array for `mu` and `W`, you can set them as follows:
     
     >>> pca = PCATransform(n_comp=500)
     >>> y = pca(x)
@@ -82,29 +78,15 @@ class PCATransform(Layer):
         
     def call(self, inputs):
         return tf.matmul(tf.subtract(inputs, self.mu), self.W)
-        
-
-class Normalization(Layer):
-    """ Batch normalization, but the parameters are not learned. 
-    This is helpful in "decoding" blocks in which we don't care
-    about learning biases/intercepts of the linear models mapping
-    a layer to target variables (such as shape components).
-    """
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    def call(self, inputs):
-        inputs_centered = tf.subtract(inputs, tf.reduce_mean(inputs, axis=0))
-        return tf.divide(inputs_centered, tf.math.reduce_std(inputs))
 
 
 @tf.custom_gradient
 def _grad_reverse(x):
-    """ Pass through of input (`x`) and inverts gradient. 
-    
-    Adapted from: https://stackoverflow.com/questions/56841166/
-    how-to-implement-gradient-reversal-layer-in-tf-2-0
+    """ Pass through of input (`x`) and inverts gradient. Adapted from:
+    https://stackoverflow.com/questions/56841166/how-to-implement-gradient-reversal-layer-in-tf-2-0
 
+    Useful when you want to reverse the gradient such that you make the network
+    learn to maximize the loss instead of minimizing it.
     """
     y = tf.identity(x)
     def custom_grad(dy):
