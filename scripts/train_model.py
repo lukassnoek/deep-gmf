@@ -39,8 +39,8 @@ TARGET_INFO = {
 
 
 @click.command()
-@click.argument('model_name', type=click.Choice(MODELS.keys()))
-@click.option('--dataset', default='gmf_112x112_emo')
+@click.option('--model', default='ResNet6', type=click.Choice(MODELS.keys()))
+@click.option('--dataset', default='/analyse/Project0257/lukas/data/gmf_112x112_emo')
 @click.option('-t', '--target', type=click.STRING, default=['id'], multiple=True)
 @click.option('--batch-size', type=click.INT, default=256)
 @click.option('--n-id-train', type=click.INT, default=None)
@@ -105,7 +105,7 @@ def main(model_name, dataset, target, batch_size, n_id_train, n_id_val,
     batch_size *= strategy.num_replicas_in_sync
     
     # Load dataset info to pass to `create_dataset`
-    info = pd.read_csv(f'/analyse/Project0257/lukas/data/{dataset}.csv')
+    info = pd.read_csv(f'{dataset}.csv')
     # Create training and validation set with a specific target variable(s)
 
     binocular = model_name in ['StereoResNet10', 'StereoResNet6']
